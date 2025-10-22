@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
   AlertCircle,
   Users,
@@ -17,7 +17,16 @@ const EXPERIENCE_LEVELS = [
   "Competitive Team Fall '25",
   "General Members",
 ];
-const POSITIONS = ["OG", "OO", "CG", "CO"];
+
+// Iron position configuration
+const IRON_SCENARIOS = {
+  FULL_ROUND_3_TEAMS: 7, // 3 teams (6 people) + 1 iron
+  FULL_ROUND_2_TEAMS: 5, // 2 teams (4 people) + 1 iron
+  HALF_ROUND_1_TEAM: 3, // 1 team (2 people) + 1 iron
+};
+
+const MAX_SPECTATOR_PROPAGATION_ITERATIONS = 10;
+
 const POSITION_NAMES = {
   OG: "Opening Government",
   OO: "Opening Opposition",
@@ -42,11 +51,89 @@ const ROUND_TYPES = {
   },
 };
 
+// Utility Functions
+const shuffleArray = (array) => {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+};
+
+const filterByRole = (participants, roleKeyword) => {
+  return participants.filter((p) => {
+    const role = (p.role || "").toLowerCase().trim();
+    return role.includes(roleKeyword);
+  });
+};
+
+const isDebater = (person) => {
+  const role = (person.role || "").toLowerCase().trim();
+  return !role || role.includes("debat") || role === "";
+};
+
+const normalizeExperience = (experience) => {
+  return experience === "General Member" ? "General Members" : experience;
+};
+
+const createIronChamber = (allPeople, chamberCount, roundType = "full") => {
+  const ironPerson = allPeople.pop();
+  const teams = [];
+
+  for (let i = 0; i < allPeople.length - 1; i += 2) {
+    teams.push({
+      id: `team-iron-${chamberCount}-${i}`,
+      members: [allPeople[i], allPeople[i + 1]],
+      experience: allPeople[i].experience,
+      position: null,
+    });
+  }
+
+  return {
+    id: `chamber-${chamberCount}`,
+    room: `Room ${chamberCount + 1}`,
+    teams: teams,
+    ironPerson: ironPerson,
+    judges: [],
+    mixed: true,
+    roundType: roundType,
+    hasIron: true,
+  };
+};
+
+const flattenTeamsToPeople = (teams) => {
+  const allPeople = [];
+  teams.forEach((team) => {
+    team.members.forEach((member) => allPeople.push(member));
+  });
+  return allPeople;
+};
+
+const parseCSVLine = (line) => {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+};
+
 function App() {
   const [participants, setParticipants] = useState([]);
   const [positionHistory, setPositionHistory] = useState({});
   const [chambers, setChambers] = useState([]);
-  const [judges, setJudges] = useState([]);
   const [spectators, setSpectators] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [activeTab, setActiveTab] = useState("input");
@@ -55,28 +142,76 @@ function App() {
   );
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverTarget, setDragOverTarget] = useState(null);
-  const [sheetUrl, setSheetUrl] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const parseCSVLine = (line) => {
-    const result = [];
-    let current = "";
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === "," && !inQuotes) {
-        result.push(current.trim());
-        current = "";
-      } else {
-        current += char;
-      }
+  // Auto-scroll when dragging near edges
+  React.useEffect(() => {
+    if (!draggedItem) {
+      return;
     }
-    result.push(current.trim());
-    return result;
-  };
+
+    let animationFrameId = null;
+    let currentMouseY = null;
+
+    const scroll = () => {
+      if (currentMouseY === null) {
+        animationFrameId = null;
+        return;
+      }
+
+      const SCROLL_ZONE = 200;
+      const MAX_SPEED = 15;
+      const viewportHeight = window.innerHeight;
+
+      let speed = 0;
+
+      if (currentMouseY < SCROLL_ZONE) {
+        const ratio = 1 - currentMouseY / SCROLL_ZONE;
+        speed = -MAX_SPEED * ratio;
+      } else if (currentMouseY > viewportHeight - SCROLL_ZONE) {
+        const ratio =
+          (currentMouseY - (viewportHeight - SCROLL_ZONE)) / SCROLL_ZONE;
+        speed = MAX_SPEED * ratio;
+      }
+
+      if (speed !== 0) {
+        window.scrollBy(0, speed);
+      }
+
+      animationFrameId = requestAnimationFrame(scroll);
+    };
+
+    const handleDrag = (e) => {
+      // drag event fires continuously during drag
+      if (e.clientY !== 0) {
+        // clientY is 0 at the end of drag, ignore that
+        currentMouseY = e.clientY;
+
+        if (!animationFrameId) {
+          animationFrameId = requestAnimationFrame(scroll);
+        }
+      }
+    };
+
+    const handleDragEnd = () => {
+      currentMouseY = null;
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
+
+    document.addEventListener("drag", handleDrag);
+    document.addEventListener("dragend", handleDragEnd);
+
+    return () => {
+      document.removeEventListener("drag", handleDrag);
+      document.removeEventListener("dragend", handleDragEnd);
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [draggedItem]);
 
   const parseCSVData = (csvText) => {
     const lines = csvText
@@ -171,20 +306,9 @@ function App() {
         return;
       }
 
-      const debaters = data.filter((p) => {
-        const role = (p.role || "").toLowerCase().trim();
-        return !role || role.includes("debat") || role === "";
-      });
-
-      const judges = data.filter((p) => {
-        const role = (p.role || "").toLowerCase().trim();
-        return role.includes("judg");
-      });
-
-      const spectators = data.filter((p) => {
-        const role = (p.role || "").toLowerCase().trim();
-        return role.includes("spectat");
-      });
+      const debaters = data.filter(isDebater);
+      const judges = filterByRole(data, "judg");
+      const spectators = filterByRole(data, "spectat");
 
       setParticipants(data);
       setAlerts([
@@ -209,28 +333,16 @@ function App() {
       "General Members": [],
     };
 
-    const judgeList = participants.filter((p) => {
-      const role = (p.role || "").toLowerCase().trim();
-      return role.includes("judg");
-    });
-    setJudges(judgeList);
-
-    const explicitSpectators = participants.filter((p) => {
-      const role = (p.role || "").toLowerCase().trim();
-      return role.includes("spectat");
-    });
-
-    const debaters = participants.filter((p) => {
-      const role = (p.role || "").toLowerCase().trim();
-      return !role || role.includes("debat") || role === "";
-    });
+    const judgeList = filterByRole(participants, "judg");
+    const explicitSpectators = filterByRole(participants, "spectat");
+    const debaters = participants.filter(isDebater);
 
     const spectatorNames = new Set();
     explicitSpectators.forEach((s) => spectatorNames.add(s.name));
 
     let changed = true;
     let iterations = 0;
-    while (changed && iterations < 10) {
+    while (changed && iterations < MAX_SPECTATOR_PROPAGATION_ITERATIONS) {
       changed = false;
       iterations++;
 
@@ -257,12 +369,9 @@ function App() {
       });
     }
 
-    const allSpectators = [];
-    participants.forEach((person) => {
-      if (spectatorNames.has(person.name)) {
-        allSpectators.push(person);
-      }
-    });
+    const allSpectators = participants.filter((person) =>
+      spectatorNames.has(person.name)
+    );
 
     const activeDebaters = debaters.filter((p) => !spectatorNames.has(p.name));
 
@@ -284,16 +393,8 @@ function App() {
               message: `${person.name} and ${partner.name} have different experience levels - cannot form team`,
             },
           ]);
-          singles[
-            person.experience === "General Member"
-              ? "General Members"
-              : person.experience
-          ].push(person);
-          singles[
-            partner.experience === "General Member"
-              ? "General Members"
-              : partner.experience
-          ].push(partner);
+          singles[normalizeExperience(person.experience)].push(person);
+          singles[normalizeExperience(partner.experience)].push(partner);
           processed.add(person.name);
           processed.add(partner.name);
           return;
@@ -309,25 +410,17 @@ function App() {
           };
         }
 
-        const normalizedExp =
-          person.experience === "General Member"
-            ? "General Members"
-            : person.experience;
         teams.push({
           id: `team-${teams.length}`,
           members: [person, partner],
-          experience: normalizedExp,
+          experience: normalizeExperience(person.experience),
           preference: person.preference || "No Preference",
           halfRound: person.halfRound || partner.halfRound || "",
         });
         processed.add(person.name);
         processed.add(partner.name);
       } else {
-        const expKey =
-          person.experience === "General Member"
-            ? "General Members"
-            : person.experience;
-        singles[expKey].push(person);
+        singles[normalizeExperience(person.experience)].push(person);
         processed.add(person.name);
       }
     });
@@ -386,15 +479,6 @@ function App() {
       teamsByExperience[team.experience].push(team);
     });
 
-    const shuffleArray = (array) => {
-      const shuffled = [...array];
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-      }
-      return shuffled;
-    };
-
     Object.keys(teamsByExperience).forEach((level) => {
       const levelTeams = shuffleArray(teamsByExperience[level]);
       teamsByExperience[level] = levelTeams;
@@ -410,7 +494,7 @@ function App() {
             ...team,
             position: null,
           })),
-          judge: null,
+          judges: [],
           mixed: false,
           roundType: "full",
           hasIron: false,
@@ -443,7 +527,7 @@ function App() {
             ...team,
             position: null,
           })),
-          judge: null,
+          judges: [],
           mixed: true,
           roundType: "full",
           hasIron: false,
@@ -472,7 +556,7 @@ function App() {
             ...team,
             position: null,
           })),
-          judge: null,
+          judges: [],
           mixed: true,
           roundType: "full",
           hasIron: false,
@@ -501,7 +585,7 @@ function App() {
             ...team,
             position: null,
           })),
-          judge: null,
+          judges: [],
           mixed: true,
           roundType: "full",
           hasIron: false,
@@ -522,87 +606,24 @@ function App() {
     );
 
     // Handle various odd-number scenarios for iron positions
-    if (totalPeople === 7) {
+    if (totalPeople === IRON_SCENARIOS.FULL_ROUND_3_TEAMS) {
       // 7 people = 3 teams + 1 iron (full round)
-      const allPeople = [];
-      allRemaining.forEach((team) => {
-        team.members.forEach((member) => allPeople.push(member));
-      });
-
-      const ironPerson = allPeople.pop();
-      const teams = [];
-      for (let i = 0; i < allPeople.length - 1; i += 2) {
-        teams.push({
-          id: `team-iron-${chamberList.length}-${i}`,
-          members: [allPeople[i], allPeople[i + 1]],
-          experience: allPeople[i].experience,
-          position: null,
-        });
-      }
-
-      chamberList.push({
-        id: `chamber-${chamberList.length}`,
-        room: `Room ${chamberList.length + 1}`,
-        teams: teams,
-        ironPerson: ironPerson,
-        judge: null,
-        mixed: true,
-        roundType: "full",
-        hasIron: true,
-      });
-    } else if (totalPeople === 5) {
+      const allPeople = flattenTeamsToPeople(allRemaining);
+      chamberList.push(
+        createIronChamber(allPeople, chamberList.length, "full")
+      );
+    } else if (totalPeople === IRON_SCENARIOS.FULL_ROUND_2_TEAMS) {
       // 5 people = 2 teams + 1 iron (full round)
-      const allPeople = [];
-      allRemaining.forEach((team) => {
-        team.members.forEach((member) => allPeople.push(member));
-      });
-
-      const ironPerson = allPeople.pop();
-      const teams = [];
-      for (let i = 0; i < allPeople.length - 1; i += 2) {
-        teams.push({
-          id: `team-iron-${chamberList.length}-${i}`,
-          members: [allPeople[i], allPeople[i + 1]],
-          experience: allPeople[i].experience,
-          position: null,
-        });
-      }
-
-      chamberList.push({
-        id: `chamber-${chamberList.length}`,
-        room: `Room ${chamberList.length + 1}`,
-        teams: teams,
-        ironPerson: ironPerson,
-        judge: null,
-        mixed: true,
-        roundType: "full",
-        hasIron: true,
-      });
-    } else if (totalPeople === 3) {
+      const allPeople = flattenTeamsToPeople(allRemaining);
+      chamberList.push(
+        createIronChamber(allPeople, chamberList.length, "full")
+      );
+    } else if (totalPeople === IRON_SCENARIOS.HALF_ROUND_1_TEAM) {
       // 3 people = 1 team + 1 iron (half round)
-      const allPeople = [];
-      allRemaining.forEach((team) => {
-        team.members.forEach((member) => allPeople.push(member));
-      });
-
-      const ironPerson = allPeople.pop();
-      chamberList.push({
-        id: `chamber-${chamberList.length}`,
-        room: `Room ${chamberList.length + 1}`,
-        teams: [
-          {
-            id: `team-iron-${chamberList.length}`,
-            members: [allPeople[0], allPeople[1]],
-            experience: allPeople[0].experience,
-            position: null,
-          },
-        ],
-        ironPerson: ironPerson,
-        judge: null,
-        mixed: true,
-        roundType: "opening",
-        hasIron: true,
-      });
+      const allPeople = flattenTeamsToPeople(allRemaining);
+      chamberList.push(
+        createIronChamber(allPeople, chamberList.length, "opening")
+      );
     } else if (totalPeople === 1) {
       // Single person left - send to spectators
       allRemaining.forEach((team) => {
@@ -619,7 +640,7 @@ function App() {
           ...team,
           position: null,
         })),
-        judge: null,
+        judges: [],
         mixed: true,
         roundType: "full",
         hasIron: false,
@@ -636,7 +657,7 @@ function App() {
           ...team,
           position: null,
         })),
-        judge: null,
+        judges: [],
         mixed: chamberTeams[0].experience !== chamberTeams[1].experience,
         roundType: "opening",
         hasIron: false,
@@ -653,7 +674,7 @@ function App() {
           ...team,
           position: null,
         })),
-        judge: null,
+        judges: [],
         mixed: chamberTeams[0].experience !== chamberTeams[1].experience,
         roundType: "closing",
         hasIron: false,
@@ -844,11 +865,25 @@ function App() {
         assignPositionsInChamber(chamber)
       );
 
-      const availableJudges = [...judgeList];
+      const availableJudges = shuffleArray([...judgeList]);
+
+      // Distribute judges: if more judges than chambers, some get 2
       chamberList.forEach((chamber) => {
+        chamber.judges = [];
         if (availableJudges.length > 0) {
-          chamber.judge = availableJudges.shift();
-        } else {
+          chamber.judges.push(availableJudges.shift());
+        }
+      });
+
+      // Distribute remaining judges randomly
+      while (availableJudges.length > 0) {
+        const randomChamberIdx = Math.floor(Math.random() * chamberList.length);
+        chamberList[randomChamberIdx].judges.push(availableJudges.shift());
+      }
+
+      // Alert if any chamber has no judges
+      chamberList.forEach((chamber) => {
+        if (chamber.judges.length === 0) {
           setAlerts((prev) => [
             ...prev,
             {
@@ -896,12 +931,58 @@ function App() {
     }
   }, [createTeams, createChambers, assignPositionsInChamber, positionHistory]);
 
+  const addChamber = () => {
+    const newChamber = {
+      id: `chamber-${Date.now()}`,
+      room: `Room ${chambers.length + 1}`,
+      teams: [],
+      judges: [],
+      mixed: false,
+      roundType: "full",
+      hasIron: false,
+      ironPerson: null,
+    };
+    setChambers([...chambers, newChamber]);
+  };
+
+  const handleRoundTypeChange = (chamberIdx, newRoundType) => {
+    const newChambers = [...chambers];
+    const chamber = newChambers[chamberIdx];
+
+    const newPositions = ROUND_TYPES[newRoundType].positions;
+
+    let unassignedCount = 0;
+    chamber.teams.forEach((team) => {
+      if (team.position && !newPositions.includes(team.position)) {
+        team.position = null;
+        unassignedCount++;
+      }
+    });
+
+    chamber.roundType = newRoundType;
+    setChambers(newChambers);
+
+    if (unassignedCount > 0) {
+      setAlerts((prev) => [
+        ...prev,
+        {
+          type: "warning",
+          message: `${unassignedCount} team(s) unassigned due to round type change. See "Unassigned Teams" section to reassign them.`,
+        },
+      ]);
+    }
+  };
+
   const handleDragStart = (e, dragType, data) => {
     setDraggedItem({ type: dragType, ...data });
     e.dataTransfer.effectAllowed = "move";
   };
 
-  const handleDragEnd = () => {
+  const handleDragEnd = (e) => {
+    // Prevent default to avoid any browser default drag behavior
+    e.preventDefault();
+
+    // Always clear drag state
     setDraggedItem(null);
     setDragOverTarget(null);
   };
@@ -922,248 +1003,393 @@ function App() {
 
   const handleDrop = (e, dropTarget) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragOverTarget(null);
 
     if (!draggedItem) return;
 
-    const newChambers = [...chambers];
-    const newSpectators = [...spectators];
-    let newHistory = { ...positionHistory };
+    // Validate that we have a valid drop target
+    if (!dropTarget || !dropTarget.type) {
+      setDraggedItem(null);
+      return;
+    }
 
-    const updateHistory = (personName, position) => {
-      if (!newHistory[personName]) {
-        newHistory[personName] = [];
-      }
-      const lastPos = newHistory[personName][newHistory[personName].length - 1];
-      if (lastPos !== position) {
-        newHistory[personName].push(position);
-      }
-    };
-
+    // Check if dropping in the same location (no-op)
     if (draggedItem.type === "person") {
-      const sourcePerson = draggedItem.person;
-      let replacedPerson = null;
-      let replacedPersonIndex = null;
-      let sourcePersonIndex = null;
-
-      // Step 1: Identify and remove the person being replaced at target
-      if (dropTarget.type === "position") {
-        const targetChamber = newChambers[dropTarget.chamberIdx];
-        const targetTeam = targetChamber.teams.find(
-          (t) => t.position === dropTarget.position
-        );
-
-        if (targetTeam && targetTeam.members.length > 0) {
-          // Determine which member to replace
-          const replaceIdx =
-            dropTarget.memberIdx !== undefined ? dropTarget.memberIdx : 0;
-
-          if (targetTeam.members[replaceIdx]) {
-            replacedPerson = targetTeam.members[replaceIdx];
-            replacedPersonIndex = replaceIdx;
-            targetTeam.members.splice(replaceIdx, 1);
-          }
-        }
-      } else if (dropTarget.type === "iron") {
-        const targetChamber = newChambers[dropTarget.chamberIdx];
-        if (targetChamber.ironPerson) {
-          replacedPerson = targetChamber.ironPerson;
-          targetChamber.ironPerson = null;
-        }
-      } else if (dropTarget.type === "spectator") {
-        // Dragging to spectators - no one is replaced
-        replacedPerson = null;
-      }
-
-      // Step 2: Remove source person from their original location and remember their index
-      if (draggedItem.source === "position") {
-        const sourceChamber = newChambers[draggedItem.chamberIdx];
-        const sourceTeam = sourceChamber.teams.find(
-          (t) => t.position === draggedItem.position
-        );
-        if (sourceTeam) {
-          const memberIdx = sourceTeam.members.findIndex(
-            (m) => m.name === sourcePerson.name
-          );
-          if (memberIdx !== -1) {
-            sourcePersonIndex = memberIdx;
-            sourceTeam.members.splice(memberIdx, 1);
-            if (sourceTeam.members.length === 0) {
-              const teamIdx = sourceChamber.teams.findIndex(
-                (t) => t.id === sourceTeam.id
-              );
-              sourceChamber.teams.splice(teamIdx, 1);
-            }
-          }
-        }
-      } else if (draggedItem.source === "iron") {
-        const sourceChamber = newChambers[draggedItem.chamberIdx];
-        sourceChamber.ironPerson = null;
-      } else if (draggedItem.source === "spectator") {
-        const spectatorIdx = newSpectators.findIndex(
-          (s) => s.name === sourcePerson.name
-        );
-        if (spectatorIdx !== -1) {
-          newSpectators.splice(spectatorIdx, 1);
-        }
-      }
-
-      // Step 3: Place source person at target location (at the same index where replaced person was)
-      if (dropTarget.type === "position") {
-        const targetChamber = newChambers[dropTarget.chamberIdx];
-        let targetTeam = targetChamber.teams.find(
-          (t) => t.position === dropTarget.position
-        );
-
-        if (!targetTeam) {
-          // Create new team if position is empty
-          targetTeam = {
-            id: `team-new-${Date.now()}`,
-            members: [],
-            experience: sourcePerson.experience,
-            position: dropTarget.position,
-          };
-          targetChamber.teams.push(targetTeam);
-        }
-
-        // Insert at the same index where we removed the person, or at the end
-        if (
-          replacedPersonIndex !== null &&
-          replacedPersonIndex <= targetTeam.members.length
-        ) {
-          targetTeam.members.splice(replacedPersonIndex, 0, sourcePerson);
-        } else {
-          targetTeam.members.push(sourcePerson);
-        }
-        updateHistory(sourcePerson.name, dropTarget.position);
-      } else if (dropTarget.type === "iron") {
-        const targetChamber = newChambers[dropTarget.chamberIdx];
-        targetChamber.ironPerson = sourcePerson;
-        updateHistory(sourcePerson.name, targetChamber.ironPosition);
-      } else if (dropTarget.type === "spectator") {
-        newSpectators.push(sourcePerson);
-      }
-
-      // Step 4: Place replaced person at source location (SWAP) at the same index
-      if (replacedPerson) {
-        if (draggedItem.source === "position") {
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          let sourceTeam = sourceChamber.teams.find(
-            (t) => t.position === draggedItem.position
-          );
-
-          if (!sourceTeam) {
-            // Create new team at source position
-            sourceTeam = {
-              id: `team-new-${Date.now()}`,
-              members: [],
-              experience: replacedPerson.experience,
-              position: draggedItem.position,
-            };
-            sourceChamber.teams.push(sourceTeam);
-          }
-
-          // Insert at the same index where we removed the source person, or at the end
-          if (
-            sourcePersonIndex !== null &&
-            sourcePersonIndex <= sourceTeam.members.length
-          ) {
-            sourceTeam.members.splice(sourcePersonIndex, 0, replacedPerson);
-          } else {
-            sourceTeam.members.push(replacedPerson);
-          }
-          updateHistory(replacedPerson.name, draggedItem.position);
-        } else if (draggedItem.source === "iron") {
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          sourceChamber.ironPerson = replacedPerson;
-          updateHistory(replacedPerson.name, sourceChamber.ironPosition);
-        } else if (draggedItem.source === "spectator") {
-          newSpectators.push(replacedPerson);
-        }
+      if (
+        draggedItem.source === dropTarget.type &&
+        draggedItem.chamberIdx === dropTarget.chamberIdx &&
+        draggedItem.position === dropTarget.position
+      ) {
+        setDraggedItem(null);
+        return;
       }
     } else if (draggedItem.type === "team") {
-      const sourceTeam = draggedItem.team;
-
-      if (dropTarget.type === "position") {
-        const targetChamber = newChambers[dropTarget.chamberIdx];
-        const targetTeam = targetChamber.teams.find(
-          (t) => t.position === dropTarget.position
-        );
-
-        if (targetTeam) {
-          // Swap teams
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          const sourceTeamIdx = sourceChamber.teams.findIndex(
-            (t) => t.id === sourceTeam.id
-          );
-          const targetTeamIdx = targetChamber.teams.findIndex(
-            (t) => t.id === targetTeam.id
-          );
-
-          const tempTeam = sourceChamber.teams[sourceTeamIdx];
-          sourceChamber.teams[sourceTeamIdx] = targetTeam;
-          targetChamber.teams[targetTeamIdx] = tempTeam;
-
-          sourceChamber.teams[sourceTeamIdx].position = draggedItem.position;
-          targetChamber.teams[targetTeamIdx].position = dropTarget.position;
-
-          sourceTeam.members.forEach((m) =>
-            updateHistory(m.name, dropTarget.position)
-          );
-          targetTeam.members.forEach((m) =>
-            updateHistory(m.name, draggedItem.position)
-          );
-        } else {
-          // Move to empty position
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          const sourceTeamIdx = sourceChamber.teams.findIndex(
-            (t) => t.id === sourceTeam.id
-          );
-          const [movedTeam] = sourceChamber.teams.splice(sourceTeamIdx, 1);
-          movedTeam.position = dropTarget.position;
-          targetChamber.teams.push(movedTeam);
-
-          sourceTeam.members.forEach((m) =>
-            updateHistory(m.name, dropTarget.position)
-          );
-        }
+      if (
+        draggedItem.chamberIdx === dropTarget.chamberIdx &&
+        draggedItem.position === dropTarget.position
+      ) {
+        setDraggedItem(null);
+        return;
       }
     }
 
-    setPositionHistory(newHistory);
-    setChambers(newChambers);
-    setSpectators(newSpectators);
-    setDraggedItem(null);
+    try {
+      const newChambers = [...chambers];
+      const newSpectators = [...spectators];
+      let newHistory = { ...positionHistory };
+
+      const updateHistory = (personName, position) => {
+        if (!position) return; // Don't track null positions
+        if (!newHistory[personName]) {
+          newHistory[personName] = [];
+        }
+        const lastPos =
+          newHistory[personName][newHistory[personName].length - 1];
+        if (lastPos !== position) {
+          newHistory[personName].push(position);
+        }
+      };
+
+      if (draggedItem.type === "person") {
+        const sourcePerson = draggedItem.person;
+        let replacedPerson = null;
+        let replacedPersonIndex = null;
+        let sourcePersonIndex = null;
+
+        // Step 1: Identify and remove the person being replaced at target
+        if (dropTarget.type === "position") {
+          const targetChamber = newChambers[dropTarget.chamberIdx];
+          const targetTeam = targetChamber.teams.find(
+            (t) => t.position === dropTarget.position
+          );
+
+          // Only replace if team is full (2 members) OR if memberIdx is specified
+          if (targetTeam && targetTeam.members.length > 0) {
+            if (
+              targetTeam.members.length === 2 ||
+              dropTarget.memberIdx !== undefined
+            ) {
+              const replaceIdx =
+                dropTarget.memberIdx !== undefined ? dropTarget.memberIdx : 0;
+
+              if (targetTeam.members[replaceIdx]) {
+                replacedPerson = targetTeam.members[replaceIdx];
+                replacedPersonIndex = replaceIdx;
+                targetTeam.members.splice(replaceIdx, 1);
+              }
+            }
+            // If team has 1 member and no specific memberIdx, don't replace - just add
+          }
+        } else if (dropTarget.type === "iron") {
+          const targetChamber = newChambers[dropTarget.chamberIdx];
+          if (targetChamber.ironPerson) {
+            replacedPerson = targetChamber.ironPerson;
+            targetChamber.ironPerson = null;
+          }
+        } else if (dropTarget.type === "judge") {
+          const targetChamber = newChambers[dropTarget.chamberIdx];
+          // For judges, just add to the array (no replacement)
+          replacedPerson = null;
+        } else if (dropTarget.type === "spectator") {
+          // Dragging to spectators - no one is replaced
+          replacedPerson = null;
+        }
+
+        // Step 2: Remove source person from their original location and remember their index
+        if (draggedItem.source === "position") {
+          const sourceChamber = newChambers[draggedItem.chamberIdx];
+          // Find team by checking all members, not just position (handles unassigned teams)
+          const sourceTeam = sourceChamber.teams.find((t) =>
+            t.members.some((m) => m.name === sourcePerson.name)
+          );
+          if (sourceTeam) {
+            const memberIdx = sourceTeam.members.findIndex(
+              (m) => m.name === sourcePerson.name
+            );
+            if (memberIdx !== -1) {
+              sourcePersonIndex = memberIdx;
+              sourceTeam.members.splice(memberIdx, 1);
+              // Remove unassigned teams when they become empty
+              if (
+                sourceTeam.members.length === 0 &&
+                sourceTeam.position === null
+              ) {
+                const teamIdx = sourceChamber.teams.findIndex(
+                  (t) => t.id === sourceTeam.id
+                );
+                sourceChamber.teams.splice(teamIdx, 1);
+              }
+            }
+          }
+        } else if (draggedItem.source === "iron") {
+          const sourceChamber = newChambers[draggedItem.chamberIdx];
+          sourceChamber.ironPerson = null;
+        } else if (draggedItem.source === "judge") {
+          const sourceChamber = newChambers[draggedItem.chamberIdx];
+          const judgeIdx = sourceChamber.judges.findIndex(
+            (j) => j.name === sourcePerson.name
+          );
+          if (judgeIdx !== -1) {
+            sourceChamber.judges.splice(judgeIdx, 1);
+          }
+        } else if (draggedItem.source === "spectator") {
+          const spectatorIdx = newSpectators.findIndex(
+            (s) => s.name === sourcePerson.name
+          );
+          if (spectatorIdx !== -1) {
+            newSpectators.splice(spectatorIdx, 1);
+          }
+        }
+
+        // Step 3: Place source person at target location (at the same index where replaced person was)
+        if (dropTarget.type === "position") {
+          const targetChamber = newChambers[dropTarget.chamberIdx];
+          let targetTeam = targetChamber.teams.find(
+            (t) => t.position === dropTarget.position
+          );
+
+          if (!targetTeam) {
+            // Create new team if position is empty
+            targetTeam = {
+              id: `team-new-${Date.now()}`,
+              members: [],
+              experience: sourcePerson.experience,
+              position: dropTarget.position,
+            };
+            targetChamber.teams.push(targetTeam);
+          }
+
+          // Insert at the same index where we removed the person, or at the end
+          if (
+            replacedPersonIndex !== null &&
+            replacedPersonIndex <= targetTeam.members.length
+          ) {
+            targetTeam.members.splice(replacedPersonIndex, 0, sourcePerson);
+          } else {
+            targetTeam.members.push(sourcePerson);
+          }
+          updateHistory(sourcePerson.name, dropTarget.position);
+        } else if (dropTarget.type === "iron") {
+          const targetChamber = newChambers[dropTarget.chamberIdx];
+          targetChamber.ironPerson = sourcePerson;
+          updateHistory(sourcePerson.name, targetChamber.ironPosition);
+        } else if (dropTarget.type === "judge") {
+          const targetChamber = newChambers[dropTarget.chamberIdx];
+          targetChamber.judges.push(sourcePerson);
+        } else if (dropTarget.type === "spectator") {
+          newSpectators.push(sourcePerson);
+        }
+
+        // Step 4: Place replaced person at source location (SWAP) at the same index
+        if (replacedPerson) {
+          if (draggedItem.source === "position") {
+            const sourceChamber = newChambers[draggedItem.chamberIdx];
+            let sourceTeam = sourceChamber.teams.find(
+              (t) => t.position === draggedItem.position
+            );
+
+            if (!sourceTeam) {
+              // Create new team at source position
+              sourceTeam = {
+                id: `team-new-${Date.now()}`,
+                members: [],
+                experience: replacedPerson.experience,
+                position: draggedItem.position,
+              };
+              sourceChamber.teams.push(sourceTeam);
+            }
+
+            // Only add if team has space (less than 2 members)
+            if (sourceTeam.members.length < 2) {
+              // Insert at the same index where we removed the source person, or at the end
+              if (
+                sourcePersonIndex !== null &&
+                sourcePersonIndex <= sourceTeam.members.length
+              ) {
+                sourceTeam.members.splice(sourcePersonIndex, 0, replacedPerson);
+              } else {
+                sourceTeam.members.push(replacedPerson);
+              }
+              updateHistory(replacedPerson.name, draggedItem.position);
+            } else {
+              // Team is full, send replaced person to spectators
+              newSpectators.push(replacedPerson);
+            }
+          } else if (draggedItem.source === "iron") {
+            const sourceChamber = newChambers[draggedItem.chamberIdx];
+            sourceChamber.ironPerson = replacedPerson;
+            updateHistory(replacedPerson.name, sourceChamber.ironPosition);
+          } else if (draggedItem.source === "judge") {
+            const sourceChamber = newChambers[draggedItem.chamberIdx];
+            sourceChamber.judges.push(replacedPerson);
+          } else if (draggedItem.source === "spectator") {
+            newSpectators.push(replacedPerson);
+          }
+        }
+      } else if (draggedItem.type === "team") {
+        const sourceTeam = draggedItem.team;
+
+        if (dropTarget.type === "position") {
+          const targetChamber = newChambers[dropTarget.chamberIdx];
+          const targetTeam = targetChamber.teams.find(
+            (t) => t.position === dropTarget.position
+          );
+
+          if (targetTeam) {
+            // Swap teams
+            const sourceChamber = newChambers[draggedItem.chamberIdx];
+            const sourceTeamIdx = sourceChamber.teams.findIndex(
+              (t) => t.id === sourceTeam.id
+            );
+            const targetTeamIdx = targetChamber.teams.findIndex(
+              (t) => t.id === targetTeam.id
+            );
+
+            const tempTeam = sourceChamber.teams[sourceTeamIdx];
+            sourceChamber.teams[sourceTeamIdx] = targetTeam;
+            targetChamber.teams[targetTeamIdx] = tempTeam;
+
+            sourceChamber.teams[sourceTeamIdx].position = draggedItem.position;
+            targetChamber.teams[targetTeamIdx].position = dropTarget.position;
+
+            sourceTeam.members.forEach((m) =>
+              updateHistory(m.name, dropTarget.position)
+            );
+            targetTeam.members.forEach((m) =>
+              updateHistory(m.name, draggedItem.position)
+            );
+          } else {
+            // Move to empty position
+            const sourceChamber = newChambers[draggedItem.chamberIdx];
+            const sourceTeamIdx = sourceChamber.teams.findIndex(
+              (t) => t.id === sourceTeam.id
+            );
+
+            // If moving within same chamber, just update position
+            if (draggedItem.chamberIdx === dropTarget.chamberIdx) {
+              sourceChamber.teams[sourceTeamIdx].position = dropTarget.position;
+            } else {
+              // Moving to different chamber
+              const [movedTeam] = sourceChamber.teams.splice(sourceTeamIdx, 1);
+              movedTeam.position = dropTarget.position;
+              targetChamber.teams.push(movedTeam);
+            }
+
+            sourceTeam.members.forEach((m) =>
+              updateHistory(m.name, dropTarget.position)
+            );
+          }
+        } else if (dropTarget.type === "spectator") {
+          // Move all team members to spectators
+          const sourceChamber = newChambers[draggedItem.chamberIdx];
+          const sourceTeamIdx = sourceChamber.teams.findIndex(
+            (t) => t.id === sourceTeam.id
+          );
+
+          if (sourceTeamIdx !== -1) {
+            sourceTeam.members.forEach((member) => {
+              newSpectators.push(member);
+            });
+            // Remove the team
+            sourceChamber.teams.splice(sourceTeamIdx, 1);
+          }
+        }
+      }
+
+      setPositionHistory(newHistory);
+      setChambers(newChambers);
+      setSpectators(newSpectators);
+
+      // Validate no duplicates exist (safety check)
+      setTimeout(() => {
+        const allPeople = [];
+        const duplicates = new Set();
+
+        chambers.forEach((chamber) => {
+          chamber.teams.forEach((team) => {
+            team.members.forEach((member) => {
+              if (allPeople.includes(member.name)) {
+                duplicates.add(member.name);
+              } else {
+                allPeople.push(member.name);
+              }
+            });
+          });
+          if (chamber.ironPerson) {
+            if (allPeople.includes(chamber.ironPerson.name)) {
+              duplicates.add(chamber.ironPerson.name);
+            } else {
+              allPeople.push(chamber.ironPerson.name);
+            }
+          }
+          if (chamber.judges) {
+            chamber.judges.forEach((judge) => {
+              if (allPeople.includes(judge.name)) {
+                duplicates.add(judge.name);
+              } else {
+                allPeople.push(judge.name);
+              }
+            });
+          }
+        });
+
+        if (duplicates.size > 0) {
+          console.error("Duplicates detected:", Array.from(duplicates));
+          setAlerts((prev) => [
+            ...prev,
+            {
+              type: "error",
+              message: `Duplicate people detected: ${Array.from(
+                duplicates
+              ).join(", ")}. Please refresh the page.`,
+            },
+          ]);
+        }
+      }, 100);
+    } catch (error) {
+      console.error("Drop error:", error);
+      setAlerts((prev) => [
+        ...prev,
+        {
+          type: "error",
+          message: "Error during drag and drop. Please try again.",
+        },
+      ]);
+    } finally {
+      // Always clear drag state, even if there's an error
+      setDraggedItem(null);
+      setDragOverTarget(null);
+    }
   };
 
   const exportToCSV = () => {
     let csv =
-      "Session Date,Chamber,Round Type,Position,Team Member 1,Team Member 2,Judge\n";
+      "Session Date,Chamber,Round Type,Position,Team Member 1,Team Member 2,Judges\n";
 
     chambers.forEach((chamber) => {
       const positions = ROUND_TYPES[chamber.roundType].positions;
+      const judgeNames =
+        chamber.judges && chamber.judges.length > 0
+          ? chamber.judges.map((j) => j.name.replace(/,/g, " ")).join("; ")
+          : "No Judge";
+
       positions.forEach((pos) => {
         const team = chamber.teams.find((t) => t.position === pos);
         if (team) {
           const member1 = team.members[0]?.name.replace(/,/g, " ") || "";
           const member2 = team.members[1]?.name.replace(/,/g, " ") || "";
-          const judge = chamber.judge
-            ? chamber.judge.name.replace(/,/g, " ")
-            : "No Judge";
           const roundTypeLabel = ROUND_TYPES[chamber.roundType].label;
-          csv += `${sessionDate},${chamber.room},${roundTypeLabel},${POSITION_NAMES[pos]},${member1},${member2},${judge}\n`;
+          csv += `${sessionDate},${chamber.room},${roundTypeLabel},${POSITION_NAMES[pos]},${member1},${member2},${judgeNames}\n`;
         }
       });
 
       if (chamber.hasIron && chamber.ironPerson && chamber.ironPosition) {
         const ironName = chamber.ironPerson.name.replace(/,/g, " ");
-        const judge = chamber.judge
-          ? chamber.judge.name.replace(/,/g, " ")
-          : "No Judge";
         const roundTypeLabel = ROUND_TYPES[chamber.roundType].label;
         csv += `${sessionDate},${chamber.room},${roundTypeLabel},${
           POSITION_NAMES[chamber.ironPosition]
-        } (Iron),${ironName},,${judge}\n`;
+        } (Iron),${ironName},,${judgeNames}\n`;
       }
     });
 
@@ -1179,7 +1405,9 @@ function App() {
   const exportHistory = () => {
     let csv = "Debater,Position History (Oldest to Newest)\n";
     Object.entries(positionHistory).forEach(([name, history]) => {
-      csv += `${name.replace(/,/g, " ")},"${history.join(" â†’ ")}"\n`;
+      csv += `${name.replace(/,/g, " ")},"${history.join(
+        " ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ "
+      )}"\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv" });
@@ -1340,25 +1568,26 @@ function App() {
                   </h3>
                   <ul className="text-sm text-blue-800 space-y-1">
                     <li>
-                      • <strong>Inputs:</strong> The Experience Level input is
-                      mandatory
+                      Ã¢â‚¬Â¢ <strong>Inputs:</strong> The Experience Level
+                      input is mandatory
                     </li>
                     <li>
-                      • <strong>Display:</strong> The display tab is for
+                      Ã¢â‚¬Â¢ <strong>Display:</strong> The display tab is for
                       download and upload to GroupMe
                     </li>
                     <li>
-                      • <strong>Rooms:</strong> You can edit rooms in the
+                      Ã¢â‚¬Â¢ <strong>Rooms:</strong> You can edit rooms in the
                       Chambers tab
                     </li>
                     <li>
-                      • <strong>Iron Position:</strong> When there are 7 people
-                      (3 teams + 1), the 7th person "irons" - debates both
-                      speeches for their side
+                      Ã¢â‚¬Â¢ <strong>Iron Position:</strong> When there are 7
+                      people (3 teams + 1), the 7th person "irons" - debates
+                      both speeches for their side
                     </li>
                     <li>
-                      • <strong>Dragging:</strong> Drag individuals or whole
-                      teams between positions. Hover to highlight swap targets
+                      Ã¢â‚¬Â¢ <strong>Dragging:</strong> Drag individuals or
+                      whole teams between positions. Hover to highlight swap
+                      targets
                     </li>
                   </ul>
                 </div>
@@ -1404,84 +1633,6 @@ function App() {
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                       <p className="text-xs text-gray-500 mt-2">
-                        Select a CSV file from your computer
-                      </p>
-                    </div>
-
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-gray-300"></div>
-                      </div>
-                      <div className="relative flex justify-center text-sm">
-                        <span className="px-2 bg-white text-gray-500">OR</span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Google Sheets Published CSV URL
-                      </label>
-                      <div className="space-y-2">
-                        <input
-                          type="text"
-                          value={sheetUrl}
-                          onChange={(e) => setSheetUrl(e.target.value)}
-                          placeholder="https://docs.google.com/spreadsheets/d/e/..."
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-red-900 focus:border-red-900"
-                        />
-                        <button
-                          onClick={async () => {
-                            if (sheetUrl) {
-                              setLoading(true);
-                              try {
-                                const response = await fetch(sheetUrl);
-                                const csvText = await response.text();
-                                handleManualInput(csvText);
-                              } catch (error) {
-                                setAlerts([
-                                  {
-                                    type: "error",
-                                    message:
-                                      "Failed to load from Google Sheets. Ensure the sheet is published.",
-                                  },
-                                ]);
-                              } finally {
-                                setLoading(false);
-                              }
-                            }
-                          }}
-                          disabled={!sheetUrl || loading}
-                          className="w-full px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                        >
-                          <FileSpreadsheet className="w-4 h-4" />
-                          {loading ? "Loading..." : "Load from Sheets"}
-                        </button>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-2">
-                        File â†’ Share â†’ Publish to web â†’ CSV â†’ Publish
-                      </p>
-                    </div>
-
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-gray-300"></div>
-                      </div>
-                      <div className="relative flex justify-center text-sm">
-                        <span className="px-2 bg-white text-gray-500">OR</span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Paste CSV Data
-                      </label>
-                      <textarea
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
-                        rows="10"
-                        placeholder="Name,Partner,Experience Level,Preference,Half Round?,Role"
-                        onChange={(e) => handleManualInput(e.target.value)}
-                      />
-                      <p className="text-xs text-gray-500 mt-2">
                         Format: Name, Partner (blank if none), Experience Level,
                         Preference, Half Round? (Opening Half/Closing
                         Half/blank), Role (Debate/Debating, Judge/Judging, or
@@ -1524,47 +1675,66 @@ function App() {
                   <div className="text-center py-12 text-gray-500">
                     <Users className="w-12 h-12 mx-auto mb-4 text-gray-400" />
                     <p>No chambers created. Load data and generate pairings.</p>
+                    <button
+                      onClick={addChamber}
+                      className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 flex items-center gap-2 mx-auto"
+                    >
+                      <Users className="w-4 h-4" />
+                      Add Chamber
+                    </button>
                   </div>
                 ) : (
                   <>
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <div>
-                          <span className="font-semibold text-blue-900">
-                            Chambers:
-                          </span>
-                          <span className="ml-2 text-blue-700">
-                            {chambers.length}
-                          </span>
+                      <div className="flex justify-between items-center">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                          <div>
+                            <span className="font-semibold text-blue-900">
+                              Chambers:
+                            </span>
+                            <span className="ml-2 text-blue-700">
+                              {chambers.length}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-blue-900">
+                              Teams:
+                            </span>
+                            <span className="ml-2 text-blue-700">
+                              {chambers.reduce(
+                                (sum, c) => sum + c.teams.length,
+                                0
+                              )}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-blue-900">
+                              Judges:
+                            </span>
+                            <span className="ml-2 text-blue-700">
+                              {chambers.reduce(
+                                (sum, c) => sum + (c.judges?.length || 0),
+                                0
+                              )}{" "}
+                              total
+                            </span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-blue-900">
+                              Spectators:
+                            </span>
+                            <span className="ml-2 text-blue-700">
+                              {spectators.length}
+                            </span>
+                          </div>
                         </div>
-                        <div>
-                          <span className="font-semibold text-blue-900">
-                            Teams:
-                          </span>
-                          <span className="ml-2 text-blue-700">
-                            {chambers.reduce(
-                              (sum, c) => sum + c.teams.length,
-                              0
-                            )}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="font-semibold text-blue-900">
-                            Judges:
-                          </span>
-                          <span className="ml-2 text-blue-700">
-                            {chambers.filter((c) => c.judge).length}/
-                            {chambers.length}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="font-semibold text-blue-900">
-                            Spectators:
-                          </span>
-                          <span className="ml-2 text-blue-700">
-                            {spectators.length}
-                          </span>
-                        </div>
+                        <button
+                          onClick={addChamber}
+                          className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 flex items-center gap-2"
+                        >
+                          <Users className="w-4 h-4" />
+                          Add Chamber
+                        </button>
                       </div>
                     </div>
 
@@ -1597,9 +1767,20 @@ function App() {
                               className="text-xl font-semibold px-3 py-1 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-48"
                               placeholder="Room name/number"
                             />
-                            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded">
-                              {ROUND_TYPES[chamber.roundType].label}
-                            </span>
+                            <select
+                              value={chamber.roundType}
+                              onChange={(e) =>
+                                handleRoundTypeChange(
+                                  chamberIdx,
+                                  e.target.value
+                                )
+                              }
+                              className="px-3 py-1 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                            >
+                              <option value="full">Full Round</option>
+                              <option value="opening">Opening Half Only</option>
+                              <option value="closing">Closing Half Only</option>
+                            </select>
                             {chamber.hasIron && (
                               <span className="px-2 py-1 bg-purple-100 text-purple-800 text-sm rounded">
                                 Iron
@@ -1697,16 +1878,13 @@ function App() {
                                                 }`}
                                                 onDragEnter={(e) => {
                                                   e.stopPropagation();
-                                                  if (
-                                                    team.members.length === 2
-                                                  ) {
-                                                    handleDragEnter(e, {
-                                                      type: "position",
-                                                      chamberIdx,
-                                                      position: pos,
-                                                      memberIdx,
-                                                    });
-                                                  }
+                                                  // Allow targeting individual members
+                                                  handleDragEnter(e, {
+                                                    type: "position",
+                                                    chamberIdx,
+                                                    position: pos,
+                                                    memberIdx,
+                                                  });
                                                 }}
                                               >
                                                 <div
@@ -1744,8 +1922,8 @@ function App() {
                                         </div>
                                       </div>
                                     ) : (
-                                      <div className="text-gray-400 italic">
-                                        Empty
+                                      <div className="text-gray-400 italic text-center py-2">
+                                        Empty - drag people here
                                       </div>
                                     )}
                                   </div>
@@ -1838,16 +2016,13 @@ function App() {
                                                 }`}
                                                 onDragEnter={(e) => {
                                                   e.stopPropagation();
-                                                  if (
-                                                    team.members.length === 2
-                                                  ) {
-                                                    handleDragEnter(e, {
-                                                      type: "position",
-                                                      chamberIdx,
-                                                      position: pos,
-                                                      memberIdx,
-                                                    });
-                                                  }
+                                                  // Allow targeting individual members
+                                                  handleDragEnter(e, {
+                                                    type: "position",
+                                                    chamberIdx,
+                                                    position: pos,
+                                                    memberIdx,
+                                                  });
                                                 }}
                                               >
                                                 <div
@@ -1885,8 +2060,8 @@ function App() {
                                         </div>
                                       </div>
                                     ) : (
-                                      <div className="text-gray-400 italic">
-                                        Empty
+                                      <div className="text-gray-400 italic text-center py-2">
+                                        Empty - drag people here
                                       </div>
                                     )}
                                   </div>
@@ -1937,33 +2112,144 @@ function App() {
                           </div>
                         )}
 
-                        <div className="mt-4 pt-4 border-t flex items-center gap-2">
-                          <UserCheck className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                          <span className="font-medium">Judge:</span>
-                          {chamber.judge ? (
-                            <span>{chamber.judge.name}</span>
-                          ) : (
-                            <span className="text-red-600">
-                              No judge assigned
-                            </span>
-                          )}
+                        {chamber.teams.filter((t) => !t.position).length >
+                          0 && (
+                          <div className="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                            <h5 className="font-semibold text-orange-900 mb-2">
+                              Unassigned Teams (
+                              {chamber.teams.filter((t) => !t.position).length})
+                            </h5>
+                            <p className="text-xs text-orange-700 mb-3">
+                              These teams have invalid positions for the current
+                              round type. Drag them to valid positions or to
+                              spectators.
+                            </p>
+                            <div className="space-y-2">
+                              {chamber.teams
+                                .filter((t) => !t.position)
+                                .map((team) => (
+                                  <div
+                                    key={team.id}
+                                    className="bg-white rounded p-2 border border-orange-300"
+                                  >
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <div
+                                        draggable
+                                        onDragStart={(e) =>
+                                          handleDragStart(e, "team", {
+                                            team,
+                                            chamberIdx,
+                                            position: null,
+                                          })
+                                        }
+                                        onDragEnd={handleDragEnd}
+                                        className="cursor-move"
+                                      >
+                                        <GripVertical className="w-4 h-4 text-orange-600" />
+                                      </div>
+                                      <span className="text-xs font-medium text-orange-800">
+                                        Unassigned Team
+                                      </span>
+                                    </div>
+                                    {team.members.map((member) => (
+                                      <div
+                                        key={member.name}
+                                        className="flex items-center gap-2 py-1"
+                                      >
+                                        <div
+                                          draggable
+                                          onDragStart={(e) => {
+                                            e.stopPropagation();
+                                            handleDragStart(e, "person", {
+                                              person: member,
+                                              source: "position",
+                                              chamberIdx,
+                                              position: null,
+                                            });
+                                          }}
+                                          onDragEnd={handleDragEnd}
+                                          className="cursor-move"
+                                        >
+                                          <GripVertical className="w-3 h-3 text-gray-400" />
+                                        </div>
+                                        <span className="text-sm">
+                                          {member.name}
+                                        </span>
+                                      </div>
+                                    ))}
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      {team.experience}
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div
+                          className="mt-4 pt-4 border-t"
+                          onDragOver={handleDragOver}
+                          onDragEnter={(e) =>
+                            handleDragEnter(e, { type: "judge", chamberIdx })
+                          }
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) =>
+                            handleDrop(e, { type: "judge", chamberIdx })
+                          }
+                        >
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <UserCheck className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                            <span className="font-medium">Judges:</span>
+                            {chamber.judges && chamber.judges.length > 0 ? (
+                              chamber.judges.map((judge, judgeIdx) => (
+                                <div
+                                  key={`${judge.name}-${judgeIdx}`}
+                                  draggable
+                                  onDragStart={(e) =>
+                                    handleDragStart(e, "person", {
+                                      person: judge,
+                                      source: "judge",
+                                      chamberIdx,
+                                    })
+                                  }
+                                  onDragEnd={handleDragEnd}
+                                  className="cursor-move flex items-center gap-1 px-2 py-1 bg-white border border-gray-300 rounded hover:shadow-md transition-shadow"
+                                >
+                                  <GripVertical className="w-3 h-3 text-gray-400" />
+                                  <span>{judge.name}</span>
+                                </div>
+                              ))
+                            ) : (
+                              <span className="text-gray-400 italic">
+                                Drop someone here to assign judge
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
 
-                    {spectators.length > 0 && (
-                      <div
-                        className="border rounded-lg p-6 bg-gray-50"
-                        onDragOver={handleDragOver}
-                        onDragEnter={(e) =>
-                          handleDragEnter(e, { type: "spectator" })
-                        }
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDrop(e, { type: "spectator" })}
-                      >
-                        <h4 className="text-lg font-semibold mb-3">
-                          Spectators ({spectators.length})
-                        </h4>
+                    <button
+                      onClick={addChamber}
+                      className="w-full px-4 py-3 bg-blue-500 text-white rounded-md hover:bg-blue-600 flex items-center justify-center gap-2 font-medium"
+                    >
+                      <Users className="w-4 h-4" />
+                      Add Chamber
+                    </button>
+
+                    <div
+                      className="border rounded-lg p-6 bg-gray-50"
+                      onDragOver={handleDragOver}
+                      onDragEnter={(e) =>
+                        handleDragEnter(e, { type: "spectator" })
+                      }
+                      onDragLeave={handleDragLeave}
+                      onDrop={(e) => handleDrop(e, { type: "spectator" })}
+                    >
+                      <h4 className="text-lg font-semibold mb-3">
+                        Spectators ({spectators.length})
+                      </h4>
+                      {spectators.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
                           {spectators.map((person, idx) => (
                             <div
@@ -1983,8 +2269,13 @@ function App() {
                             </div>
                           ))}
                         </div>
-                      </div>
-                    )}
+                      ) : (
+                        <div className="text-gray-400 italic text-center py-4">
+                          No spectators - drag someone here to make them
+                          spectate
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
@@ -2159,12 +2450,19 @@ function App() {
                                 </div>
                               )}
 
-                              <div className="judge-section mt-4 pt-3 border-t border-gray-200 flex items-center gap-2 text-sm">
+                              <div className="judge-section mt-4 pt-3 border-t border-gray-200 flex items-center gap-2 text-sm flex-wrap">
                                 <span className="judge-label font-medium">
-                                  Judge:
+                                  Judges:
                                 </span>
-                                {chamber.judge ? (
-                                  <span>{chamber.judge.name}</span>
+                                {chamber.judges && chamber.judges.length > 0 ? (
+                                  chamber.judges.map((judge, idx) => (
+                                    <span key={idx}>
+                                      {judge.name}
+                                      {idx < chamber.judges.length - 1
+                                        ? ", "
+                                        : ""}
+                                    </span>
+                                  ))
                                 ) : (
                                   <span className="no-judge text-red-600">
                                     No judge assigned
