@@ -346,8 +346,15 @@ function App() {
         });
       }
 
+      // Keep odd person as a 1-person team for potential iron position
       if (levelSingles.length % 2 === 1) {
-        newSpectators.push(levelSingles[levelSingles.length - 1]);
+        teams.push({
+          id: `team-${teams.length}`,
+          members: [levelSingles[levelSingles.length - 1]],
+          experience: level,
+          preference: "No Preference",
+          halfRound: levelSingles[levelSingles.length - 1].halfRound || "",
+        });
       }
     });
 
@@ -514,8 +521,37 @@ function App() {
       0
     );
 
+    // Handle various odd-number scenarios for iron positions
     if (totalPeople === 7) {
-      // 7 people = 3 teams + 1 iron
+      // 7 people = 3 teams + 1 iron (full round)
+      const allPeople = [];
+      allRemaining.forEach((team) => {
+        team.members.forEach((member) => allPeople.push(member));
+      });
+
+      const ironPerson = allPeople.pop();
+      const teams = [];
+      for (let i = 0; i < allPeople.length - 1; i += 2) {
+        teams.push({
+          id: `team-iron-${chamberList.length}-${i}`,
+          members: [allPeople[i], allPeople[i + 1]],
+          experience: allPeople[i].experience,
+          position: null,
+        });
+      }
+
+      chamberList.push({
+        id: `chamber-${chamberList.length}`,
+        room: `Room ${chamberList.length + 1}`,
+        teams: teams,
+        ironPerson: ironPerson,
+        judge: null,
+        mixed: true,
+        roundType: "full",
+        hasIron: true,
+      });
+    } else if (totalPeople === 5) {
+      // 5 people = 2 teams + 1 iron (full round)
       const allPeople = [];
       allRemaining.forEach((team) => {
         team.members.forEach((member) => allPeople.push(member));
@@ -543,7 +579,7 @@ function App() {
         hasIron: true,
       });
     } else if (totalPeople === 3) {
-      // 3 people = 1 team + 1 iron in half-round
+      // 3 people = 1 team + 1 iron (half round)
       const allPeople = [];
       allRemaining.forEach((team) => {
         team.members.forEach((member) => allPeople.push(member));
@@ -567,8 +603,15 @@ function App() {
         roundType: "opening",
         hasIron: true,
       });
+    } else if (totalPeople === 1) {
+      // Single person left - send to spectators
+      allRemaining.forEach((team) => {
+        team.members.forEach((member) => {
+          setSpectators((prev) => [...prev, member]);
+        });
+      });
     } else if (allRemaining.length > 0) {
-      // Any other number of teams - create a chamber with whatever we have
+      // Even number of people or other scenarios - create regular chamber
       chamberList.push({
         id: `chamber-${chamberList.length}`,
         room: `Room ${chamberList.length + 1}`,
@@ -899,195 +942,144 @@ function App() {
 
     if (draggedItem.type === "person") {
       const sourcePerson = draggedItem.person;
+      let replacedPerson = null;
+      let replacedPersonIndex = null;
+      let sourcePersonIndex = null;
 
+      // Step 1: Identify and remove the person being replaced at target
       if (dropTarget.type === "position") {
         const targetChamber = newChambers[dropTarget.chamberIdx];
         const targetTeam = targetChamber.teams.find(
           (t) => t.position === dropTarget.position
         );
 
-        // Remove person from source first
-        if (draggedItem.source === "spectator") {
-          const spectatorIdx = newSpectators.findIndex(
-            (s) => s.name === sourcePerson.name
-          );
-          if (spectatorIdx !== -1) newSpectators.splice(spectatorIdx, 1);
-        } else if (draggedItem.source === "iron") {
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          sourceChamber.ironPerson = null;
-          sourceChamber.ironPosition = null;
-        } else if (draggedItem.source === "position") {
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          const sourceTeam = sourceChamber.teams.find(
-            (t) => t.position === draggedItem.position
-          );
-          if (sourceTeam) {
-            const memberIdx = sourceTeam.members.findIndex(
-              (m) => m.name === sourcePerson.name
-            );
-            if (memberIdx !== -1) {
-              sourceTeam.members.splice(memberIdx, 1);
-              // If team is now empty, remove it
-              if (sourceTeam.members.length === 0) {
-                const teamIdx = sourceChamber.teams.findIndex(
-                  (t) => t.id === sourceTeam.id
-                );
-                sourceChamber.teams.splice(teamIdx, 1);
-              }
-            }
-          }
-        }
+        if (targetTeam && targetTeam.members.length > 0) {
+          // Determine which member to replace
+          const replaceIdx =
+            dropTarget.memberIdx !== undefined ? dropTarget.memberIdx : 0;
 
-        // Add person to target
-        if (!targetTeam) {
-          // Empty position - create new team
-          targetChamber.teams.push({
-            id: `team-new-${Date.now()}`,
-            members: [sourcePerson],
-            experience: sourcePerson.experience,
-            position: dropTarget.position,
-          });
-          updateHistory(sourcePerson.name, dropTarget.position);
-        } else if (targetTeam.members.length === 1) {
-          // One person - join them
-          targetTeam.members.push(sourcePerson);
-          updateHistory(sourcePerson.name, dropTarget.position);
-        } else if (
-          targetTeam.members.length === 2 &&
-          dropTarget.memberIdx !== undefined
-        ) {
-          // Two people - swap with specific member
-          const kickedPerson = targetTeam.members[dropTarget.memberIdx];
-          targetTeam.members[dropTarget.memberIdx] = sourcePerson;
-          updateHistory(sourcePerson.name, dropTarget.position);
-
-          // Put kicked person back to source or spectators
-          if (draggedItem.source === "spectator") {
-            newSpectators.push(kickedPerson);
-          } else if (draggedItem.source === "iron") {
-            const sourceChamber = newChambers[draggedItem.chamberIdx];
-            sourceChamber.ironPerson = kickedPerson;
-            sourceChamber.ironPosition = draggedItem.position;
-            updateHistory(kickedPerson.name, draggedItem.position);
-          } else if (draggedItem.source === "position") {
-            const sourceChamber = newChambers[draggedItem.chamberIdx];
-            const sourceTeam = sourceChamber.teams.find(
-              (t) => t.position === draggedItem.position
-            );
-            if (sourceTeam && sourceTeam.members.length === 0) {
-              // Source team is now empty, put kicked person there
-              sourceTeam.members.push(kickedPerson);
-              updateHistory(kickedPerson.name, draggedItem.position);
-            } else if (sourceTeam && sourceTeam.members.length === 1) {
-              // Source has 1 person, put kicked person there too
-              sourceTeam.members.push(kickedPerson);
-              updateHistory(kickedPerson.name, draggedItem.position);
-            } else {
-              // Source is full or doesn't exist, send to spectators
-              newSpectators.push(kickedPerson);
-            }
+          if (targetTeam.members[replaceIdx]) {
+            replacedPerson = targetTeam.members[replaceIdx];
+            replacedPersonIndex = replaceIdx;
+            targetTeam.members.splice(replaceIdx, 1);
           }
-        } else if (targetTeam.members.length === 2) {
-          // Two people but no memberIdx specified - send first person to spectators
-          const kickedPerson = targetTeam.members[0];
-          targetTeam.members[0] = sourcePerson;
-          updateHistory(sourcePerson.name, dropTarget.position);
-          newSpectators.push(kickedPerson);
         }
       } else if (dropTarget.type === "iron") {
         const targetChamber = newChambers[dropTarget.chamberIdx];
-        const existingIron = targetChamber.ironPerson;
-
-        // Remove from source
-        if (draggedItem.source === "spectator") {
-          const spectatorIdx = newSpectators.findIndex(
-            (s) => s.name === sourcePerson.name
-          );
-          if (spectatorIdx !== -1) newSpectators.splice(spectatorIdx, 1);
-        } else if (draggedItem.source === "position") {
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          const sourceTeam = sourceChamber.teams.find(
-            (t) => t.position === draggedItem.position
-          );
-          if (sourceTeam) {
-            const memberIdx = sourceTeam.members.findIndex(
-              (m) => m.name === sourcePerson.name
-            );
-            if (memberIdx !== -1) {
-              sourceTeam.members.splice(memberIdx, 1);
-              if (sourceTeam.members.length === 0) {
-                const teamIdx = sourceChamber.teams.findIndex(
-                  (t) => t.id === sourceTeam.id
-                );
-                sourceChamber.teams.splice(teamIdx, 1);
-              }
-            }
-          }
-        } else if (draggedItem.source === "iron") {
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          sourceChamber.ironPerson = null;
-        }
-
-        // Set as iron
-        targetChamber.ironPerson = sourcePerson;
-        updateHistory(sourcePerson.name, targetChamber.ironPosition);
-
-        // Put existing iron back to source
-        if (existingIron) {
-          if (draggedItem.source === "spectator") {
-            newSpectators.push(existingIron);
-          } else if (draggedItem.source === "position") {
-            const sourceChamber = newChambers[draggedItem.chamberIdx];
-            let sourceTeam = sourceChamber.teams.find(
-              (t) => t.position === draggedItem.position
-            );
-            if (!sourceTeam) {
-              // Create new team at source position
-              sourceChamber.teams.push({
-                id: `team-new-${Date.now()}`,
-                members: [existingIron],
-                experience: existingIron.experience,
-                position: draggedItem.position,
-              });
-              updateHistory(existingIron.name, draggedItem.position);
-            } else if (sourceTeam.members.length < 2) {
-              sourceTeam.members.push(existingIron);
-              updateHistory(existingIron.name, draggedItem.position);
-            } else {
-              newSpectators.push(existingIron);
-            }
-          } else if (draggedItem.source === "iron") {
-            const sourceChamber = newChambers[draggedItem.chamberIdx];
-            sourceChamber.ironPerson = existingIron;
-            updateHistory(existingIron.name, sourceChamber.ironPosition);
-          }
+        if (targetChamber.ironPerson) {
+          replacedPerson = targetChamber.ironPerson;
+          targetChamber.ironPerson = null;
         }
       } else if (dropTarget.type === "spectator") {
-        // Remove from source
-        if (draggedItem.source === "position") {
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          const sourceTeam = sourceChamber.teams.find(
-            (t) => t.position === draggedItem.position
+        // Dragging to spectators - no one is replaced
+        replacedPerson = null;
+      }
+
+      // Step 2: Remove source person from their original location and remember their index
+      if (draggedItem.source === "position") {
+        const sourceChamber = newChambers[draggedItem.chamberIdx];
+        const sourceTeam = sourceChamber.teams.find(
+          (t) => t.position === draggedItem.position
+        );
+        if (sourceTeam) {
+          const memberIdx = sourceTeam.members.findIndex(
+            (m) => m.name === sourcePerson.name
           );
-          if (sourceTeam) {
-            const memberIdx = sourceTeam.members.findIndex(
-              (m) => m.name === sourcePerson.name
-            );
-            if (memberIdx !== -1) {
-              sourceTeam.members.splice(memberIdx, 1);
-              if (sourceTeam.members.length === 0) {
-                const teamIdx = sourceChamber.teams.findIndex(
-                  (t) => t.id === sourceTeam.id
-                );
-                sourceChamber.teams.splice(teamIdx, 1);
-              }
+          if (memberIdx !== -1) {
+            sourcePersonIndex = memberIdx;
+            sourceTeam.members.splice(memberIdx, 1);
+            if (sourceTeam.members.length === 0) {
+              const teamIdx = sourceChamber.teams.findIndex(
+                (t) => t.id === sourceTeam.id
+              );
+              sourceChamber.teams.splice(teamIdx, 1);
             }
           }
+        }
+      } else if (draggedItem.source === "iron") {
+        const sourceChamber = newChambers[draggedItem.chamberIdx];
+        sourceChamber.ironPerson = null;
+      } else if (draggedItem.source === "spectator") {
+        const spectatorIdx = newSpectators.findIndex(
+          (s) => s.name === sourcePerson.name
+        );
+        if (spectatorIdx !== -1) {
+          newSpectators.splice(spectatorIdx, 1);
+        }
+      }
+
+      // Step 3: Place source person at target location (at the same index where replaced person was)
+      if (dropTarget.type === "position") {
+        const targetChamber = newChambers[dropTarget.chamberIdx];
+        let targetTeam = targetChamber.teams.find(
+          (t) => t.position === dropTarget.position
+        );
+
+        if (!targetTeam) {
+          // Create new team if position is empty
+          targetTeam = {
+            id: `team-new-${Date.now()}`,
+            members: [],
+            experience: sourcePerson.experience,
+            position: dropTarget.position,
+          };
+          targetChamber.teams.push(targetTeam);
+        }
+
+        // Insert at the same index where we removed the person, or at the end
+        if (
+          replacedPersonIndex !== null &&
+          replacedPersonIndex <= targetTeam.members.length
+        ) {
+          targetTeam.members.splice(replacedPersonIndex, 0, sourcePerson);
+        } else {
+          targetTeam.members.push(sourcePerson);
+        }
+        updateHistory(sourcePerson.name, dropTarget.position);
+      } else if (dropTarget.type === "iron") {
+        const targetChamber = newChambers[dropTarget.chamberIdx];
+        targetChamber.ironPerson = sourcePerson;
+        updateHistory(sourcePerson.name, targetChamber.ironPosition);
+      } else if (dropTarget.type === "spectator") {
+        newSpectators.push(sourcePerson);
+      }
+
+      // Step 4: Place replaced person at source location (SWAP) at the same index
+      if (replacedPerson) {
+        if (draggedItem.source === "position") {
+          const sourceChamber = newChambers[draggedItem.chamberIdx];
+          let sourceTeam = sourceChamber.teams.find(
+            (t) => t.position === draggedItem.position
+          );
+
+          if (!sourceTeam) {
+            // Create new team at source position
+            sourceTeam = {
+              id: `team-new-${Date.now()}`,
+              members: [],
+              experience: replacedPerson.experience,
+              position: draggedItem.position,
+            };
+            sourceChamber.teams.push(sourceTeam);
+          }
+
+          // Insert at the same index where we removed the source person, or at the end
+          if (
+            sourcePersonIndex !== null &&
+            sourcePersonIndex <= sourceTeam.members.length
+          ) {
+            sourceTeam.members.splice(sourcePersonIndex, 0, replacedPerson);
+          } else {
+            sourceTeam.members.push(replacedPerson);
+          }
+          updateHistory(replacedPerson.name, draggedItem.position);
         } else if (draggedItem.source === "iron") {
           const sourceChamber = newChambers[draggedItem.chamberIdx];
-          sourceChamber.ironPerson = null;
+          sourceChamber.ironPerson = replacedPerson;
+          updateHistory(replacedPerson.name, sourceChamber.ironPosition);
+        } else if (draggedItem.source === "spectator") {
+          newSpectators.push(replacedPerson);
         }
-        newSpectators.push(sourcePerson);
       }
     } else if (draggedItem.type === "team") {
       const sourceTeam = draggedItem.team;
@@ -1187,7 +1179,7 @@ function App() {
   const exportHistory = () => {
     let csv = "Debater,Position History (Oldest to Newest)\n";
     Object.entries(positionHistory).forEach(([name, history]) => {
-      csv += `${name.replace(/,/g, " ")},"${history.join(" → ")}"\n`;
+      csv += `${name.replace(/,/g, " ")},"${history.join(" â†’ ")}"\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv" });
@@ -1466,7 +1458,7 @@ function App() {
                         </button>
                       </div>
                       <p className="text-xs text-gray-500 mt-2">
-                        File → Share → Publish to web → CSV → Publish
+                        File â†’ Share â†’ Publish to web â†’ CSV â†’ Publish
                       </p>
                     </div>
 
