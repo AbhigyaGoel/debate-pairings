@@ -61,21 +61,18 @@ const shuffleArray = (array) => {
   return shuffled;
 };
 
-const filterByRole = (participants, roleKeyword) => {
-  return participants.filter((p) => {
-    const role = (p.role || "").toLowerCase().trim();
-    return role.includes(roleKeyword);
-  });
-};
+const filterByRole = (participants, roleKeyword) =>
+  participants.filter((p) =>
+    (p.role || "").toLowerCase().trim().includes(roleKeyword)
+  );
 
 const isDebater = (person) => {
   const role = (person.role || "").toLowerCase().trim();
   return !role || role.includes("debat") || role === "";
 };
 
-const normalizeExperience = (experience) => {
-  return experience === "General Member" ? "General Members" : experience;
-};
+const normalizeExperience = (experience) =>
+  experience === "General Member" ? "General Members" : experience;
 
 const createIronChamber = (allPeople, chamberCount, roundType = "full") => {
   const ironPerson = allPeople.pop();
@@ -93,22 +90,16 @@ const createIronChamber = (allPeople, chamberCount, roundType = "full") => {
   return {
     id: `chamber-${chamberCount}`,
     room: `Room ${chamberCount + 1}`,
-    teams: teams,
-    ironPerson: ironPerson,
+    teams,
+    ironPerson,
     judges: [],
     mixed: true,
-    roundType: roundType,
+    roundType,
     hasIron: true,
   };
 };
 
-const flattenTeamsToPeople = (teams) => {
-  const allPeople = [];
-  teams.forEach((team) => {
-    team.members.forEach((member) => allPeople.push(member));
-  });
-  return allPeople;
-};
+const flattenTeamsToPeople = (teams) => teams.flatMap((team) => team.members);
 
 const parseCSVLine = (line) => {
   const result = [];
@@ -1406,7 +1397,7 @@ function App() {
     let csv = "Debater,Position History (Oldest to Newest)\n";
     Object.entries(positionHistory).forEach(([name, history]) => {
       csv += `${name.replace(/,/g, " ")},"${history.join(
-        " ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ "
+        " ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ "
       )}"\n`;
     });
 
@@ -1568,26 +1559,26 @@ function App() {
                   </h3>
                   <ul className="text-sm text-blue-800 space-y-1">
                     <li>
-                      Ã¢â‚¬Â¢ <strong>Inputs:</strong> The Experience Level
-                      input is mandatory
+                      ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ <strong>Inputs:</strong> The Experience
+                      Level input is mandatory
                     </li>
                     <li>
-                      Ã¢â‚¬Â¢ <strong>Display:</strong> The display tab is for
-                      download and upload to GroupMe
+                      ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ <strong>Display:</strong> The display tab
+                      is for download and upload to GroupMe
                     </li>
                     <li>
-                      Ã¢â‚¬Â¢ <strong>Rooms:</strong> You can edit rooms in the
-                      Chambers tab
+                      ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ <strong>Rooms:</strong> You can edit rooms
+                      in the Chambers tab
                     </li>
                     <li>
-                      Ã¢â‚¬Â¢ <strong>Iron Position:</strong> When there are 7
-                      people (3 teams + 1), the 7th person "irons" - debates
-                      both speeches for their side
+                      ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ <strong>Iron Position:</strong> When there
+                      are 7 people (3 teams + 1), the 7th person "irons" -
+                      debates both speeches for their side
                     </li>
                     <li>
-                      Ã¢â‚¬Â¢ <strong>Dragging:</strong> Drag individuals or
-                      whole teams between positions. Hover to highlight swap
-                      targets
+                      ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ <strong>Dragging:</strong> Drag
+                      individuals or whole teams between positions. Hover to
+                      highlight swap targets
                     </li>
                   </ul>
                 </div>
