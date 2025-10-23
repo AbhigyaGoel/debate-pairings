@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   AlertCircle,
   Users,
@@ -9,7 +9,6 @@ import {
   FileSpreadsheet,
   Download,
   RefreshCw,
-  Eye,
 } from "lucide-react";
 
 const EXPERIENCE_LEVELS = [
@@ -17,16 +16,12 @@ const EXPERIENCE_LEVELS = [
   "Competitive Team Fall '25",
   "General Members",
 ];
-
-// Iron position configuration
 const IRON_SCENARIOS = {
-  FULL_ROUND_3_TEAMS: 7, // 3 teams (6 people) + 1 iron
-  FULL_ROUND_2_TEAMS: 5, // 2 teams (4 people) + 1 iron
-  HALF_ROUND_1_TEAM: 3, // 1 team (2 people) + 1 iron
+  FULL_ROUND_3_TEAMS: 7,
+  FULL_ROUND_2_TEAMS: 5,
+  HALF_ROUND_1_TEAM: 3,
 };
-
 const MAX_SPECTATOR_PROPAGATION_ITERATIONS = 10;
-
 const POSITION_NAMES = {
   OG: "Opening Government",
   OO: "Opening Opposition",
@@ -51,7 +46,6 @@ const ROUND_TYPES = {
   },
 };
 
-// Utility Functions
 const shuffleArray = (array) => {
   const shuffled = [...array];
   for (let i = shuffled.length - 1; i > 0; i--) {
@@ -71,13 +65,12 @@ const isDebater = (person) => {
   return !role || role.includes("debat") || role === "";
 };
 
-const normalizeExperience = (experience) =>
-  experience === "General Member" ? "General Members" : experience;
+const normalizeExperience = (exp) =>
+  exp === "General Member" ? "General Members" : exp;
 
 const createIronChamber = (allPeople, chamberCount, roundType = "full") => {
   const ironPerson = allPeople.pop();
   const teams = [];
-
   for (let i = 0; i < allPeople.length - 1; i += 2) {
     teams.push({
       id: `team-iron-${chamberCount}-${i}`,
@@ -86,7 +79,6 @@ const createIronChamber = (allPeople, chamberCount, roundType = "full") => {
       position: null,
     });
   }
-
   return {
     id: `chamber-${chamberCount}`,
     room: `Room ${chamberCount + 1}`,
@@ -103,19 +95,15 @@ const flattenTeamsToPeople = (teams) => teams.flatMap((team) => team.members);
 
 const parseCSVLine = (line) => {
   const result = [];
-  let current = "";
-  let inQuotes = false;
-
+  let current = "",
+    inQuotes = false;
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === "," && !inQuotes) {
+    if (char === '"') inQuotes = !inQuotes;
+    else if (char === "," && !inQuotes) {
       result.push(current.trim());
       current = "";
-    } else {
-      current += char;
-    }
+    } else current += char;
   }
   result.push(current.trim());
   return result;
@@ -135,55 +123,34 @@ function App() {
   const [dragOverTarget, setDragOverTarget] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // Auto-scroll when dragging near edges
-  React.useEffect(() => {
-    if (!draggedItem) {
-      return;
-    }
-
-    let animationFrameId = null;
-    let currentMouseY = null;
-
+  useEffect(() => {
+    if (!draggedItem) return;
+    let animationFrameId = null,
+      currentMouseY = null;
     const scroll = () => {
       if (currentMouseY === null) {
         animationFrameId = null;
         return;
       }
-
-      const SCROLL_ZONE = 200;
-      const MAX_SPEED = 15;
-      const viewportHeight = window.innerHeight;
-
+      const SCROLL_ZONE = 200,
+        MAX_SPEED = 15,
+        viewportHeight = window.innerHeight;
       let speed = 0;
-
-      if (currentMouseY < SCROLL_ZONE) {
-        const ratio = 1 - currentMouseY / SCROLL_ZONE;
-        speed = -MAX_SPEED * ratio;
-      } else if (currentMouseY > viewportHeight - SCROLL_ZONE) {
-        const ratio =
-          (currentMouseY - (viewportHeight - SCROLL_ZONE)) / SCROLL_ZONE;
-        speed = MAX_SPEED * ratio;
-      }
-
-      if (speed !== 0) {
-        window.scrollBy(0, speed);
-      }
-
+      if (currentMouseY < SCROLL_ZONE)
+        speed = -MAX_SPEED * (1 - currentMouseY / SCROLL_ZONE);
+      else if (currentMouseY > viewportHeight - SCROLL_ZONE)
+        speed =
+          MAX_SPEED *
+          ((currentMouseY - (viewportHeight - SCROLL_ZONE)) / SCROLL_ZONE);
+      if (speed !== 0) window.scrollBy(0, speed);
       animationFrameId = requestAnimationFrame(scroll);
     };
-
     const handleDrag = (e) => {
-      // drag event fires continuously during drag
       if (e.clientY !== 0) {
-        // clientY is 0 at the end of drag, ignore that
         currentMouseY = e.clientY;
-
-        if (!animationFrameId) {
-          animationFrameId = requestAnimationFrame(scroll);
-        }
+        if (!animationFrameId) animationFrameId = requestAnimationFrame(scroll);
       }
     };
-
     const handleDragEnd = () => {
       currentMouseY = null;
       if (animationFrameId) {
@@ -191,16 +158,12 @@ function App() {
         animationFrameId = null;
       }
     };
-
     document.addEventListener("drag", handleDrag);
     document.addEventListener("dragend", handleDragEnd);
-
     return () => {
       document.removeEventListener("drag", handleDrag);
       document.removeEventListener("dragend", handleDragEnd);
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-      }
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
     };
   }, [draggedItem]);
 
@@ -210,11 +173,9 @@ function App() {
       .split("\n")
       .filter((line) => line.trim());
     if (lines.length === 0) return [];
-
     const headers = parseCSVLine(lines[0]);
-    const data = [];
-    const skipped = [];
-
+    const data = [],
+      skipped = [];
     for (let i = 1; i < lines.length; i++) {
       const values = parseCSVLine(lines[i]);
       const row = {
@@ -225,46 +186,28 @@ function App() {
         halfRound: "",
         role: "Debate",
       };
-
       headers.forEach((header, index) => {
         const value = (values[index] || "").trim();
         const headerLower = header.toLowerCase().trim();
-
-        if (headerLower === "name") {
-          row.name = value;
-        } else if (headerLower.includes("partner")) {
-          row.partner = value;
-        } else if (headerLower.includes("experience")) {
-          row.experience = value;
-        } else if (headerLower.includes("preference")) {
+        if (headerLower === "name") row.name = value;
+        else if (headerLower.includes("partner")) row.partner = value;
+        else if (headerLower.includes("experience")) row.experience = value;
+        else if (headerLower.includes("preference"))
           row.preference = value || "No Preference";
-        } else if (
-          headerLower.includes("half") &&
-          headerLower.includes("round")
-        ) {
+        else if (headerLower.includes("half") && headerLower.includes("round"))
           row.halfRound = value || "";
-        } else if (headerLower === "role") {
-          row.role = value || "Debate";
-        }
+        else if (headerLower === "role") row.role = value || "Debate";
       });
-
-      if (row.experience === "General Member") {
+      if (row.experience === "General Member")
         row.experience = "General Members";
-      }
-
       if (row.name && row.experience) {
-        const validExperience = EXPERIENCE_LEVELS.includes(row.experience);
-        if (validExperience) {
-          data.push(row);
-        } else {
+        if (EXPERIENCE_LEVELS.includes(row.experience)) data.push(row);
+        else
           skipped.push(`${row.name} (invalid experience: "${row.experience}")`);
-        }
-      } else if (row.name) {
+      } else if (row.name)
         skipped.push(`${row.name} (missing experience level)`);
-      }
     }
-
-    if (skipped.length > 0) {
+    if (skipped.length > 0)
       setAlerts((prev) => [
         ...prev,
         {
@@ -272,20 +215,16 @@ function App() {
           message: `Skipped ${skipped.length} entries: ${skipped.join(", ")}`,
         },
       ]);
-    }
-
     return data;
   };
 
   const handleManualInput = (csvText) => {
-    if (!csvText || !csvText.trim()) {
+    if (!csvText?.trim()) {
       setAlerts([{ type: "error", message: "Please provide CSV data" }]);
       return;
     }
-
     try {
       const data = parseCSVData(csvText);
-
       if (data.length === 0) {
         setAlerts([
           {
@@ -296,11 +235,9 @@ function App() {
         ]);
         return;
       }
-
-      const debaters = data.filter(isDebater);
-      const judges = filterByRole(data, "judg");
-      const spectators = filterByRole(data, "spectat");
-
+      const debaters = data.filter(isDebater),
+        judges = filterByRole(data, "judg"),
+        spectators = filterByRole(data, "spectat");
       setParticipants(data);
       setAlerts([
         {
@@ -316,30 +253,23 @@ function App() {
   };
 
   const createTeams = useCallback(() => {
-    const teams = [];
-    const processed = new Set();
-    const singles = {
-      "Returning Members": [],
-      "Competitive Team Fall '25": [],
-      "General Members": [],
-    };
-
-    const judgeList = filterByRole(participants, "judg");
-    const explicitSpectators = filterByRole(participants, "spectat");
-    const debaters = participants.filter(isDebater);
-
+    const teams = [],
+      processed = new Set(),
+      singles = {
+        "Returning Members": [],
+        "Competitive Team Fall '25": [],
+        "General Members": [],
+      };
+    const judgeList = filterByRole(participants, "judg"),
+      explicitSpectators = filterByRole(participants, "spectat"),
+      debaters = participants.filter(isDebater);
     const spectatorNames = new Set();
     explicitSpectators.forEach((s) => spectatorNames.add(s.name));
 
-    let changed = true;
-    let iterations = 0;
-    while (changed && iterations < MAX_SPECTATOR_PROPAGATION_ITERATIONS) {
-      changed = false;
-      iterations++;
-
+    const propagateSpectators = () => {
+      let changed = false;
       participants.forEach((person) => {
         const partnerName = (person.partner || "").trim();
-
         if (
           spectatorNames.has(person.name) &&
           partnerName &&
@@ -348,7 +278,6 @@ function App() {
           spectatorNames.add(partnerName);
           changed = true;
         }
-
         if (
           partnerName &&
           spectatorNames.has(partnerName) &&
@@ -358,24 +287,27 @@ function App() {
           changed = true;
         }
       });
-    }
+      return changed;
+    };
 
+    let iterations = 0;
+    while (
+      propagateSpectators() &&
+      iterations < MAX_SPECTATOR_PROPAGATION_ITERATIONS
+    ) {
+      iterations++;
+    }
     const allSpectators = participants.filter((person) =>
       spectatorNames.has(person.name)
     );
-
     const activeDebaters = debaters.filter((p) => !spectatorNames.has(p.name));
-
     activeDebaters.forEach((person) => {
       if (processed.has(person.name)) return;
-
       const partnerName = (person.partner || "").trim();
-
       if (partnerName) {
         let partner = activeDebaters.find(
           (other) => other.name === partnerName && !processed.has(other.name)
         );
-
         if (partner && partner.experience !== person.experience) {
           setAlerts((prev) => [
             ...prev,
@@ -390,8 +322,7 @@ function App() {
           processed.add(partner.name);
           return;
         }
-
-        if (!partner) {
+        if (!partner)
           partner = {
             name: partnerName,
             partner: "",
@@ -399,8 +330,6 @@ function App() {
             preference: "No Preference",
             role: "Debate",
           };
-        }
-
         teams.push({
           id: `team-${teams.length}`,
           members: [person, partner],
@@ -415,8 +344,6 @@ function App() {
         processed.add(person.name);
       }
     });
-
-    const newSpectators = allSpectators;
     Object.keys(singles).forEach((level) => {
       const levelSingles = singles[level];
       for (let i = 0; i < levelSingles.length - 1; i += 2) {
@@ -429,9 +356,7 @@ function App() {
             levelSingles[i].halfRound || levelSingles[i + 1].halfRound || "",
         });
       }
-
-      // Keep odd person as a 1-person team for potential iron position
-      if (levelSingles.length % 2 === 1) {
+      if (levelSingles.length % 2 === 1)
         teams.push({
           id: `team-${teams.length}`,
           members: [levelSingles[levelSingles.length - 1]],
@@ -439,16 +364,13 @@ function App() {
           preference: "No Preference",
           halfRound: levelSingles[levelSingles.length - 1].halfRound || "",
         });
-      }
     });
-
-    setSpectators(newSpectators);
+    setSpectators(allSpectators);
     return { teams, judges: judgeList };
   }, [participants]);
 
   const createChambers = useCallback((teams) => {
     const chamberList = [];
-
     const fullRoundTeams = teams.filter(
       (t) =>
         !t.halfRound || t.halfRound.toLowerCase() === "no" || t.halfRound === ""
@@ -459,239 +381,137 @@ function App() {
     const closingHalfTeams = teams.filter(
       (t) => t.halfRound && t.halfRound.toLowerCase().includes("closing")
     );
-
     const teamsByExperience = {
       "Returning Members": [],
       "Competitive Team Fall '25": [],
       "General Members": [],
     };
-
-    fullRoundTeams.forEach((team) => {
-      teamsByExperience[team.experience].push(team);
-    });
-
+    fullRoundTeams.forEach((team) =>
+      teamsByExperience[team.experience].push(team)
+    );
     Object.keys(teamsByExperience).forEach((level) => {
-      const levelTeams = shuffleArray(teamsByExperience[level]);
-      teamsByExperience[level] = levelTeams;
+      teamsByExperience[level] = shuffleArray(teamsByExperience[level]);
     });
-
     Object.keys(teamsByExperience).forEach((level) => {
       const levelTeams = teamsByExperience[level];
-      while (levelTeams.length >= 4) {
+      while (levelTeams.length >= 4)
         chamberList.push({
           id: `chamber-${chamberList.length}`,
           room: `Room ${chamberList.length + 1}`,
-          teams: levelTeams.splice(0, 4).map((team) => ({
-            ...team,
-            position: null,
-          })),
+          teams: levelTeams
+            .splice(0, 4)
+            .map((team) => ({ ...team, position: null })),
           judges: [],
           mixed: false,
           roundType: "full",
           hasIron: false,
         });
-      }
     });
-
-    const remainingReturning = teamsByExperience["Returning Members"];
-    const remainingCompetitive = teamsByExperience["Competitive Team Fall '25"];
-    const remainingGeneral = teamsByExperience["General Members"];
-
-    while (remainingCompetitive.length + remainingGeneral.length >= 4) {
-      const chamberTeams = [];
-      while (
-        chamberTeams.length < 4 &&
-        (remainingCompetitive.length > 0 || remainingGeneral.length > 0)
-      ) {
-        if (remainingCompetitive.length > 0) {
-          chamberTeams.push(remainingCompetitive.shift());
+    const [remainingReturning, remainingCompetitive, remainingGeneral] = [
+      teamsByExperience["Returning Members"],
+      teamsByExperience["Competitive Team Fall '25"],
+      teamsByExperience["General Members"],
+    ];
+    const mixTeams = (arr1, arr2) => {
+      while (arr1.length + arr2.length >= 4) {
+        const chamberTeams = [];
+        while (
+          chamberTeams.length < 4 &&
+          (arr1.length > 0 || arr2.length > 0)
+        ) {
+          if (arr1.length > 0) chamberTeams.push(arr1.shift());
+          if (chamberTeams.length < 4 && arr2.length > 0)
+            chamberTeams.push(arr2.shift());
         }
-        if (chamberTeams.length < 4 && remainingGeneral.length > 0) {
-          chamberTeams.push(remainingGeneral.shift());
-        }
+        if (chamberTeams.length === 4)
+          chamberList.push({
+            id: `chamber-${chamberList.length}`,
+            room: `Room ${chamberList.length + 1}`,
+            teams: chamberTeams.map((team) => ({ ...team, position: null })),
+            judges: [],
+            mixed: true,
+            roundType: "full",
+            hasIron: false,
+          });
       }
-      if (chamberTeams.length === 4) {
-        chamberList.push({
-          id: `chamber-${chamberList.length}`,
-          room: `Room ${chamberList.length + 1}`,
-          teams: chamberTeams.map((team) => ({
-            ...team,
-            position: null,
-          })),
-          judges: [],
-          mixed: true,
-          roundType: "full",
-          hasIron: false,
-        });
-      }
-    }
-
-    while (remainingCompetitive.length + remainingReturning.length >= 4) {
-      const chamberTeams = [];
-      while (
-        chamberTeams.length < 4 &&
-        (remainingCompetitive.length > 0 || remainingReturning.length > 0)
-      ) {
-        if (remainingCompetitive.length > 0) {
-          chamberTeams.push(remainingCompetitive.shift());
-        }
-        if (chamberTeams.length < 4 && remainingReturning.length > 0) {
-          chamberTeams.push(remainingReturning.shift());
-        }
-      }
-      if (chamberTeams.length === 4) {
-        chamberList.push({
-          id: `chamber-${chamberList.length}`,
-          room: `Room ${chamberList.length + 1}`,
-          teams: chamberTeams.map((team) => ({
-            ...team,
-            position: null,
-          })),
-          judges: [],
-          mixed: true,
-          roundType: "full",
-          hasIron: false,
-        });
-      }
-    }
-
-    while (remainingReturning.length + remainingGeneral.length >= 4) {
-      const chamberTeams = [];
-      while (
-        chamberTeams.length < 4 &&
-        (remainingReturning.length > 0 || remainingGeneral.length > 0)
-      ) {
-        if (remainingReturning.length > 0) {
-          chamberTeams.push(remainingReturning.shift());
-        }
-        if (chamberTeams.length < 4 && remainingGeneral.length > 0) {
-          chamberTeams.push(remainingGeneral.shift());
-        }
-      }
-      if (chamberTeams.length === 4) {
-        chamberList.push({
-          id: `chamber-${chamberList.length}`,
-          room: `Room ${chamberList.length + 1}`,
-          teams: chamberTeams.map((team) => ({
-            ...team,
-            position: null,
-          })),
-          judges: [],
-          mixed: true,
-          roundType: "full",
-          hasIron: false,
-        });
-      }
-    }
-
+    };
+    mixTeams(remainingCompetitive, remainingGeneral);
+    mixTeams(remainingCompetitive, remainingReturning);
+    mixTeams(remainingReturning, remainingGeneral);
     const allRemaining = [
       ...remainingReturning,
       ...remainingCompetitive,
       ...remainingGeneral,
     ];
-
-    // Count total PEOPLE not team objects
     const totalPeople = allRemaining.reduce(
       (sum, team) => sum + team.members.length,
       0
     );
-
-    // Handle various odd-number scenarios for iron positions
-    if (totalPeople === IRON_SCENARIOS.FULL_ROUND_3_TEAMS) {
-      // 7 people = 3 teams + 1 iron (full round)
-      const allPeople = flattenTeamsToPeople(allRemaining);
+    if (totalPeople === IRON_SCENARIOS.FULL_ROUND_3_TEAMS)
       chamberList.push(
-        createIronChamber(allPeople, chamberList.length, "full")
+        createIronChamber(
+          flattenTeamsToPeople(allRemaining),
+          chamberList.length,
+          "full"
+        )
       );
-    } else if (totalPeople === IRON_SCENARIOS.FULL_ROUND_2_TEAMS) {
-      // 5 people = 2 teams + 1 iron (full round)
-      const allPeople = flattenTeamsToPeople(allRemaining);
+    else if (totalPeople === IRON_SCENARIOS.FULL_ROUND_2_TEAMS)
       chamberList.push(
-        createIronChamber(allPeople, chamberList.length, "full")
+        createIronChamber(
+          flattenTeamsToPeople(allRemaining),
+          chamberList.length,
+          "full"
+        )
       );
-    } else if (totalPeople === IRON_SCENARIOS.HALF_ROUND_1_TEAM) {
-      // 3 people = 1 team + 1 iron (half round)
-      const allPeople = flattenTeamsToPeople(allRemaining);
+    else if (totalPeople === IRON_SCENARIOS.HALF_ROUND_1_TEAM)
       chamberList.push(
-        createIronChamber(allPeople, chamberList.length, "opening")
+        createIronChamber(
+          flattenTeamsToPeople(allRemaining),
+          chamberList.length,
+          "opening"
+        )
       );
-    } else if (totalPeople === 1) {
-      // Single person left - send to spectators
-      allRemaining.forEach((team) => {
-        team.members.forEach((member) => {
-          setSpectators((prev) => [...prev, member]);
-        });
-      });
-    } else if (allRemaining.length > 0) {
-      // Even number of people or other scenarios - create regular chamber
+    else if (totalPeople === 1)
+      allRemaining.forEach((team) =>
+        team.members.forEach((member) =>
+          setSpectators((prev) => [...prev, member])
+        )
+      );
+    else if (allRemaining.length > 0)
       chamberList.push({
         id: `chamber-${chamberList.length}`,
         room: `Room ${chamberList.length + 1}`,
-        teams: allRemaining.map((team) => ({
-          ...team,
-          position: null,
-        })),
+        teams: allRemaining.map((team) => ({ ...team, position: null })),
         judges: [],
         mixed: true,
         roundType: "full",
         hasIron: false,
       });
-    }
-
-    const shuffledOpening = shuffleArray(openingHalfTeams);
-    while (shuffledOpening.length >= 2) {
-      const chamberTeams = shuffledOpening.splice(0, 2);
-      chamberList.push({
-        id: `chamber-${chamberList.length}`,
-        room: `Room ${chamberList.length + 1}`,
-        teams: chamberTeams.map((team) => ({
-          ...team,
-          position: null,
-        })),
-        judges: [],
-        mixed: chamberTeams[0].experience !== chamberTeams[1].experience,
-        roundType: "opening",
-        hasIron: false,
-      });
-    }
-
-    const shuffledClosing = shuffleArray(closingHalfTeams);
-    while (shuffledClosing.length >= 2) {
-      const chamberTeams = shuffledClosing.splice(0, 2);
-      chamberList.push({
-        id: `chamber-${chamberList.length}`,
-        room: `Room ${chamberList.length + 1}`,
-        teams: chamberTeams.map((team) => ({
-          ...team,
-          position: null,
-        })),
-        judges: [],
-        mixed: chamberTeams[0].experience !== chamberTeams[1].experience,
-        roundType: "closing",
-        hasIron: false,
-      });
-    }
-
-    if (shuffledOpening.length > 0) {
-      setSpectators((prev) => {
-        const newSpectators = [...prev];
-        shuffledOpening.forEach((team) => {
-          team.members.forEach((member) => newSpectators.push(member));
+    const processHalfRound = (teams) => {
+      const shuffled = shuffleArray(teams);
+      while (shuffled.length >= 2) {
+        const chamberTeams = shuffled.splice(0, 2);
+        chamberList.push({
+          id: `chamber-${chamberList.length}`,
+          room: `Room ${chamberList.length + 1}`,
+          teams: chamberTeams.map((team) => ({ ...team, position: null })),
+          judges: [],
+          mixed: chamberTeams[0].experience !== chamberTeams[1].experience,
+          roundType: teams === openingHalfTeams ? "opening" : "closing",
+          hasIron: false,
         });
-        return newSpectators;
-      });
-    }
-
-    if (shuffledClosing.length > 0) {
-      setSpectators((prev) => {
-        const newSpectators = [...prev];
-        shuffledClosing.forEach((team) => {
-          team.members.forEach((member) => newSpectators.push(member));
+      }
+      if (shuffled.length > 0)
+        setSpectators((prev) => {
+          const newSpectators = [...prev];
+          shuffled.forEach((team) =>
+            team.members.forEach((member) => newSpectators.push(member))
+          );
+          return newSpectators;
         });
-        return newSpectators;
-      });
-    }
-
+    };
+    processHalfRound(openingHalfTeams);
+    processHalfRound(closingHalfTeams);
     return chamberList;
   }, []);
 
@@ -699,49 +519,26 @@ function App() {
     (debaterName, preference, chamberRoundType) => {
       const availablePositions = ROUND_TYPES[chamberRoundType].positions;
       const history = positionHistory[debaterName] || [];
-
-      if (history.length === 0) {
-        if (preference === "Opening Half" && availablePositions.includes("OG"))
-          return "OG";
-        if (preference === "Opening Half" && availablePositions.includes("OO"))
-          return "OO";
-        if (preference === "Closing Half" && availablePositions.includes("CG"))
-          return "CG";
-        if (preference === "Closing Half" && availablePositions.includes("CO"))
-          return "CO";
-        return availablePositions[0];
-      }
-
+      const preferenceMap = {
+        "Opening Half": ["OG", "OO"],
+        "Closing Half": ["CG", "CO"],
+      };
+      const getPreferred = () =>
+        preferenceMap[preference]?.find((p) => availablePositions.includes(p));
+      if (history.length === 0) return getPreferred() || availablePositions[0];
       const positionsDone = new Set(history);
       const positionsNotDone = availablePositions.filter(
         (p) => !positionsDone.has(p)
       );
-
-      if (positionsNotDone.length === 0) {
-        if (preference === "Opening Half" && availablePositions.includes("OG"))
-          return "OG";
-        if (preference === "Opening Half" && availablePositions.includes("OO"))
-          return "OO";
-        if (preference === "Closing Half" && availablePositions.includes("CG"))
-          return "CG";
-        if (preference === "Closing Half" && availablePositions.includes("CO"))
-          return "CO";
-        return availablePositions[0];
-      }
-
+      if (positionsNotDone.length === 0)
+        return getPreferred() || availablePositions[0];
       let candidatePositions = positionsNotDone;
-      if (preference === "Opening Half") {
-        const opening = ["OG", "OO"].filter((p) =>
+      if (preference && preferenceMap[preference]) {
+        const preferred = preferenceMap[preference].filter((p) =>
           positionsNotDone.includes(p)
         );
-        if (opening.length > 0) candidatePositions = opening;
-      } else if (preference === "Closing Half") {
-        const closing = ["CG", "CO"].filter((p) =>
-          positionsNotDone.includes(p)
-        );
-        if (closing.length > 0) candidatePositions = closing;
+        if (preferred.length > 0) candidatePositions = preferred;
       }
-
       return candidatePositions[0];
     },
     [positionHistory]
@@ -751,7 +548,6 @@ function App() {
     (chamber) => {
       const availablePositions = ROUND_TYPES[chamber.roundType].positions;
       const takenPositions = new Set();
-
       chamber.teams.forEach((team) => {
         const teamPreference = team.preference;
         const member1Pos = getNextPosition(
@@ -766,23 +562,17 @@ function App() {
               chamber.roundType
             )
           : member1Pos;
-
         let assignedPos = null;
-
-        if (member1Pos === member2Pos && !takenPositions.has(member1Pos)) {
+        if (member1Pos === member2Pos && !takenPositions.has(member1Pos))
           assignedPos = member1Pos;
-        } else if (!takenPositions.has(member1Pos)) {
-          assignedPos = member1Pos;
-        } else if (team.members[1] && !takenPositions.has(member2Pos)) {
+        else if (!takenPositions.has(member1Pos)) assignedPos = member1Pos;
+        else if (team.members[1] && !takenPositions.has(member2Pos))
           assignedPos = member2Pos;
-        }
-
         if (assignedPos) {
           team.position = assignedPos;
           takenPositions.add(assignedPos);
         }
       });
-
       chamber.teams.forEach((team) => {
         if (!team.position) {
           const available = availablePositions.find(
@@ -794,7 +584,6 @@ function App() {
           }
         }
       });
-
       if (chamber.hasIron && chamber.ironPerson) {
         const ironPreference = chamber.ironPerson.preference || "No Preference";
         const ironPos = getNextPosition(
@@ -802,22 +591,14 @@ function App() {
           ironPreference,
           chamber.roundType
         );
-
-        let assignedIronPos = null;
-        if (!takenPositions.has(ironPos)) {
-          assignedIronPos = ironPos;
-        } else {
-          assignedIronPos = availablePositions.find(
-            (p) => !takenPositions.has(p)
-          );
-        }
-
+        const assignedIronPos = !takenPositions.has(ironPos)
+          ? ironPos
+          : availablePositions.find((p) => !takenPositions.has(p));
         if (assignedIronPos) {
           chamber.ironPosition = assignedIronPos;
           takenPositions.add(assignedIronPos);
         }
       }
-
       return chamber;
     },
     [getNextPosition]
@@ -827,19 +608,14 @@ function App() {
     setAlerts([]);
     setSpectators([]);
     setLoading(true);
-
     try {
       const result = createTeams();
-
-      if (!result || !result.teams) {
+      if (!result?.teams) {
         setAlerts([{ type: "error", message: "Failed to create teams" }]);
         setLoading(false);
         return;
       }
-
-      const teams = result.teams;
-      const judgeList = result.judges || [];
-
+      const { teams, judges: judgeList } = result;
       if (teams.length < 2) {
         setAlerts([
           {
@@ -850,31 +626,21 @@ function App() {
         setLoading(false);
         return;
       }
-
-      let chamberList = createChambers(teams);
-      chamberList = chamberList.map((chamber) =>
+      let chamberList = createChambers(teams).map((chamber) =>
         assignPositionsInChamber(chamber)
       );
-
       const availableJudges = shuffleArray([...judgeList]);
-
-      // Distribute judges: if more judges than chambers, some get 2
       chamberList.forEach((chamber) => {
         chamber.judges = [];
-        if (availableJudges.length > 0) {
+        if (availableJudges.length > 0)
           chamber.judges.push(availableJudges.shift());
-        }
       });
-
-      // Distribute remaining judges randomly
-      while (availableJudges.length > 0) {
-        const randomChamberIdx = Math.floor(Math.random() * chamberList.length);
-        chamberList[randomChamberIdx].judges.push(availableJudges.shift());
-      }
-
-      // Alert if any chamber has no judges
+      while (availableJudges.length > 0)
+        chamberList[Math.floor(Math.random() * chamberList.length)].judges.push(
+          availableJudges.shift()
+        );
       chamberList.forEach((chamber) => {
-        if (chamber.judges.length === 0) {
+        if (chamber.judges.length === 0)
           setAlerts((prev) => [
             ...prev,
             {
@@ -882,31 +648,24 @@ function App() {
               message: `${chamber.room} has no judge - insufficient judges`,
             },
           ]);
-        }
       });
-
       const newHistory = { ...positionHistory };
       chamberList.forEach((chamber) => {
-        chamber.teams.forEach((team) => {
+        chamber.teams.forEach((team) =>
           team.members.forEach((member) => {
-            if (!newHistory[member.name]) {
-              newHistory[member.name] = [];
-            }
+            if (!newHistory[member.name]) newHistory[member.name] = [];
             newHistory[member.name].push(team.position);
-          });
-        });
+          })
+        );
         if (chamber.hasIron && chamber.ironPerson && chamber.ironPosition) {
-          if (!newHistory[chamber.ironPerson.name]) {
+          if (!newHistory[chamber.ironPerson.name])
             newHistory[chamber.ironPerson.name] = [];
-          }
           newHistory[chamber.ironPerson.name].push(chamber.ironPosition);
         }
       });
-
       setPositionHistory(newHistory);
       setChambers(chamberList);
       setActiveTab("chambers");
-
       setAlerts((prev) => [
         ...prev,
         {
@@ -922,26 +681,25 @@ function App() {
     }
   }, [createTeams, createChambers, assignPositionsInChamber, positionHistory]);
 
-  const addChamber = () => {
-    const newChamber = {
-      id: `chamber-${Date.now()}`,
-      room: `Room ${chambers.length + 1}`,
-      teams: [],
-      judges: [],
-      mixed: false,
-      roundType: "full",
-      hasIron: false,
-      ironPerson: null,
-    };
-    setChambers([...chambers, newChamber]);
-  };
+  const addChamber = () =>
+    setChambers([
+      ...chambers,
+      {
+        id: `chamber-${Date.now()}`,
+        room: `Room ${chambers.length + 1}`,
+        teams: [],
+        judges: [],
+        mixed: false,
+        roundType: "full",
+        hasIron: false,
+        ironPerson: null,
+      },
+    ]);
 
   const handleRoundTypeChange = (chamberIdx, newRoundType) => {
     const newChambers = [...chambers];
     const chamber = newChambers[chamberIdx];
-
     const newPositions = ROUND_TYPES[newRoundType].positions;
-
     let unassignedCount = 0;
     chamber.teams.forEach((team) => {
       if (team.position && !newPositions.includes(team.position)) {
@@ -949,11 +707,9 @@ function App() {
         unassignedCount++;
       }
     });
-
     chamber.roundType = newRoundType;
     setChambers(newChambers);
-
-    if (unassignedCount > 0) {
+    if (unassignedCount > 0)
       setAlerts((prev) => [
         ...prev,
         {
@@ -961,101 +717,73 @@ function App() {
           message: `${unassignedCount} team(s) unassigned due to round type change. See "Unassigned Teams" section to reassign them.`,
         },
       ]);
-    }
   };
 
   const handleDragStart = (e, dragType, data) => {
     setDraggedItem({ type: dragType, ...data });
     e.dataTransfer.effectAllowed = "move";
   };
-
   const handleDragEnd = (e) => {
-    // Prevent default to avoid any browser default drag behavior
     e.preventDefault();
-
-    // Always clear drag state
     setDraggedItem(null);
     setDragOverTarget(null);
   };
-
   const handleDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   };
-
   const handleDragEnter = (e, target) => {
     e.preventDefault();
     setDragOverTarget(target);
   };
-
-  const handleDragLeave = () => {
-    setDragOverTarget(null);
-  };
+  const handleDragLeave = () => setDragOverTarget(null);
 
   const handleDrop = (e, dropTarget) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOverTarget(null);
-
-    if (!draggedItem) return;
-
-    // Validate that we have a valid drop target
-    if (!dropTarget || !dropTarget.type) {
+    if (!draggedItem || !dropTarget?.type) {
       setDraggedItem(null);
       return;
     }
-
-    // Check if dropping in the same location (no-op)
-    if (draggedItem.type === "person") {
-      if (
-        draggedItem.source === dropTarget.type &&
-        draggedItem.chamberIdx === dropTarget.chamberIdx &&
-        draggedItem.position === dropTarget.position
-      ) {
-        setDraggedItem(null);
-        return;
-      }
-    } else if (draggedItem.type === "team") {
-      if (
-        draggedItem.chamberIdx === dropTarget.chamberIdx &&
-        draggedItem.position === dropTarget.position
-      ) {
-        setDraggedItem(null);
-        return;
-      }
+    if (
+      draggedItem.type === "person" &&
+      draggedItem.source === dropTarget.type &&
+      draggedItem.chamberIdx === dropTarget.chamberIdx &&
+      draggedItem.position === dropTarget.position
+    ) {
+      setDraggedItem(null);
+      return;
     }
-
+    if (
+      draggedItem.type === "team" &&
+      draggedItem.chamberIdx === dropTarget.chamberIdx &&
+      draggedItem.position === dropTarget.position
+    ) {
+      setDraggedItem(null);
+      return;
+    }
     try {
-      const newChambers = [...chambers];
-      const newSpectators = [...spectators];
+      const newChambers = [...chambers],
+        newSpectators = [...spectators];
       let newHistory = { ...positionHistory };
-
       const updateHistory = (personName, position) => {
-        if (!position) return; // Don't track null positions
-        if (!newHistory[personName]) {
-          newHistory[personName] = [];
-        }
+        if (!position) return;
+        if (!newHistory[personName]) newHistory[personName] = [];
         const lastPos =
           newHistory[personName][newHistory[personName].length - 1];
-        if (lastPos !== position) {
-          newHistory[personName].push(position);
-        }
+        if (lastPos !== position) newHistory[personName].push(position);
       };
-
       if (draggedItem.type === "person") {
         const sourcePerson = draggedItem.person;
-        let replacedPerson = null;
-        let replacedPersonIndex = null;
-        let sourcePersonIndex = null;
-
-        // Step 1: Identify and remove the person being replaced at target
+        let replacedPerson = null,
+          replacedPersonIndex = null,
+          sourcePersonIndex = null;
         if (dropTarget.type === "position") {
           const targetChamber = newChambers[dropTarget.chamberIdx];
           const targetTeam = targetChamber.teams.find(
             (t) => t.position === dropTarget.position
           );
-
-          // Only replace if team is full (2 members) OR if memberIdx is specified
           if (targetTeam && targetTeam.members.length > 0) {
             if (
               targetTeam.members.length === 2 ||
@@ -1063,14 +791,12 @@ function App() {
             ) {
               const replaceIdx =
                 dropTarget.memberIdx !== undefined ? dropTarget.memberIdx : 0;
-
               if (targetTeam.members[replaceIdx]) {
                 replacedPerson = targetTeam.members[replaceIdx];
                 replacedPersonIndex = replaceIdx;
                 targetTeam.members.splice(replaceIdx, 1);
               }
             }
-            // If team has 1 member and no specific memberIdx, don't replace - just add
           }
         } else if (dropTarget.type === "iron") {
           const targetChamber = newChambers[dropTarget.chamberIdx];
@@ -1078,19 +804,9 @@ function App() {
             replacedPerson = targetChamber.ironPerson;
             targetChamber.ironPerson = null;
           }
-        } else if (dropTarget.type === "judge") {
-          const targetChamber = newChambers[dropTarget.chamberIdx];
-          // For judges, just add to the array (no replacement)
-          replacedPerson = null;
-        } else if (dropTarget.type === "spectator") {
-          // Dragging to spectators - no one is replaced
-          replacedPerson = null;
         }
-
-        // Step 2: Remove source person from their original location and remember their index
         if (draggedItem.source === "position") {
           const sourceChamber = newChambers[draggedItem.chamberIdx];
-          // Find team by checking all members, not just position (handles unassigned teams)
           const sourceTeam = sourceChamber.teams.find((t) =>
             t.members.some((m) => m.name === sourcePerson.name)
           );
@@ -1101,7 +817,6 @@ function App() {
             if (memberIdx !== -1) {
               sourcePersonIndex = memberIdx;
               sourceTeam.members.splice(memberIdx, 1);
-              // Remove unassigned teams when they become empty
               if (
                 sourceTeam.members.length === 0 &&
                 sourceTeam.position === null
@@ -1113,35 +828,26 @@ function App() {
               }
             }
           }
-        } else if (draggedItem.source === "iron") {
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          sourceChamber.ironPerson = null;
-        } else if (draggedItem.source === "judge") {
-          const sourceChamber = newChambers[draggedItem.chamberIdx];
-          const judgeIdx = sourceChamber.judges.findIndex(
+        } else if (draggedItem.source === "iron")
+          newChambers[draggedItem.chamberIdx].ironPerson = null;
+        else if (draggedItem.source === "judge") {
+          const judgeIdx = newChambers[draggedItem.chamberIdx].judges.findIndex(
             (j) => j.name === sourcePerson.name
           );
-          if (judgeIdx !== -1) {
-            sourceChamber.judges.splice(judgeIdx, 1);
-          }
+          if (judgeIdx !== -1)
+            newChambers[draggedItem.chamberIdx].judges.splice(judgeIdx, 1);
         } else if (draggedItem.source === "spectator") {
           const spectatorIdx = newSpectators.findIndex(
             (s) => s.name === sourcePerson.name
           );
-          if (spectatorIdx !== -1) {
-            newSpectators.splice(spectatorIdx, 1);
-          }
+          if (spectatorIdx !== -1) newSpectators.splice(spectatorIdx, 1);
         }
-
-        // Step 3: Place source person at target location (at the same index where replaced person was)
         if (dropTarget.type === "position") {
           const targetChamber = newChambers[dropTarget.chamberIdx];
           let targetTeam = targetChamber.teams.find(
             (t) => t.position === dropTarget.position
           );
-
           if (!targetTeam) {
-            // Create new team if position is empty
             targetTeam = {
               id: `team-new-${Date.now()}`,
               members: [],
@@ -1150,38 +856,30 @@ function App() {
             };
             targetChamber.teams.push(targetTeam);
           }
-
-          // Insert at the same index where we removed the person, or at the end
           if (
             replacedPersonIndex !== null &&
             replacedPersonIndex <= targetTeam.members.length
-          ) {
+          )
             targetTeam.members.splice(replacedPersonIndex, 0, sourcePerson);
-          } else {
-            targetTeam.members.push(sourcePerson);
-          }
+          else targetTeam.members.push(sourcePerson);
           updateHistory(sourcePerson.name, dropTarget.position);
         } else if (dropTarget.type === "iron") {
-          const targetChamber = newChambers[dropTarget.chamberIdx];
-          targetChamber.ironPerson = sourcePerson;
-          updateHistory(sourcePerson.name, targetChamber.ironPosition);
-        } else if (dropTarget.type === "judge") {
-          const targetChamber = newChambers[dropTarget.chamberIdx];
-          targetChamber.judges.push(sourcePerson);
-        } else if (dropTarget.type === "spectator") {
+          newChambers[dropTarget.chamberIdx].ironPerson = sourcePerson;
+          updateHistory(
+            sourcePerson.name,
+            newChambers[dropTarget.chamberIdx].ironPosition
+          );
+        } else if (dropTarget.type === "judge")
+          newChambers[dropTarget.chamberIdx].judges.push(sourcePerson);
+        else if (dropTarget.type === "spectator")
           newSpectators.push(sourcePerson);
-        }
-
-        // Step 4: Place replaced person at source location (SWAP) at the same index
         if (replacedPerson) {
           if (draggedItem.source === "position") {
             const sourceChamber = newChambers[draggedItem.chamberIdx];
             let sourceTeam = sourceChamber.teams.find(
               (t) => t.position === draggedItem.position
             );
-
             if (!sourceTeam) {
-              // Create new team at source position
               sourceTeam = {
                 id: `team-new-${Date.now()}`,
                 members: [],
@@ -1190,45 +888,34 @@ function App() {
               };
               sourceChamber.teams.push(sourceTeam);
             }
-
-            // Only add if team has space (less than 2 members)
             if (sourceTeam.members.length < 2) {
-              // Insert at the same index where we removed the source person, or at the end
               if (
                 sourcePersonIndex !== null &&
                 sourcePersonIndex <= sourceTeam.members.length
-              ) {
+              )
                 sourceTeam.members.splice(sourcePersonIndex, 0, replacedPerson);
-              } else {
-                sourceTeam.members.push(replacedPerson);
-              }
+              else sourceTeam.members.push(replacedPerson);
               updateHistory(replacedPerson.name, draggedItem.position);
-            } else {
-              // Team is full, send replaced person to spectators
-              newSpectators.push(replacedPerson);
-            }
+            } else newSpectators.push(replacedPerson);
           } else if (draggedItem.source === "iron") {
-            const sourceChamber = newChambers[draggedItem.chamberIdx];
-            sourceChamber.ironPerson = replacedPerson;
-            updateHistory(replacedPerson.name, sourceChamber.ironPosition);
-          } else if (draggedItem.source === "judge") {
-            const sourceChamber = newChambers[draggedItem.chamberIdx];
-            sourceChamber.judges.push(replacedPerson);
-          } else if (draggedItem.source === "spectator") {
+            newChambers[draggedItem.chamberIdx].ironPerson = replacedPerson;
+            updateHistory(
+              replacedPerson.name,
+              newChambers[draggedItem.chamberIdx].ironPosition
+            );
+          } else if (draggedItem.source === "judge")
+            newChambers[draggedItem.chamberIdx].judges.push(replacedPerson);
+          else if (draggedItem.source === "spectator")
             newSpectators.push(replacedPerson);
-          }
         }
       } else if (draggedItem.type === "team") {
         const sourceTeam = draggedItem.team;
-
         if (dropTarget.type === "position") {
           const targetChamber = newChambers[dropTarget.chamberIdx];
           const targetTeam = targetChamber.teams.find(
             (t) => t.position === dropTarget.position
           );
-
           if (targetTeam) {
-            // Swap teams
             const sourceChamber = newChambers[draggedItem.chamberIdx];
             const sourceTeamIdx = sourceChamber.teams.findIndex(
               (t) => t.id === sourceTeam.id
@@ -1236,14 +923,11 @@ function App() {
             const targetTeamIdx = targetChamber.teams.findIndex(
               (t) => t.id === targetTeam.id
             );
-
             const tempTeam = sourceChamber.teams[sourceTeamIdx];
             sourceChamber.teams[sourceTeamIdx] = targetTeam;
             targetChamber.teams[targetTeamIdx] = tempTeam;
-
             sourceChamber.teams[sourceTeamIdx].position = draggedItem.position;
             targetChamber.teams[targetTeamIdx].position = dropTarget.position;
-
             sourceTeam.members.forEach((m) =>
               updateHistory(m.name, dropTarget.position)
             );
@@ -1251,80 +935,56 @@ function App() {
               updateHistory(m.name, draggedItem.position)
             );
           } else {
-            // Move to empty position
             const sourceChamber = newChambers[draggedItem.chamberIdx];
             const sourceTeamIdx = sourceChamber.teams.findIndex(
               (t) => t.id === sourceTeam.id
             );
-
-            // If moving within same chamber, just update position
-            if (draggedItem.chamberIdx === dropTarget.chamberIdx) {
+            if (draggedItem.chamberIdx === dropTarget.chamberIdx)
               sourceChamber.teams[sourceTeamIdx].position = dropTarget.position;
-            } else {
-              // Moving to different chamber
+            else {
               const [movedTeam] = sourceChamber.teams.splice(sourceTeamIdx, 1);
               movedTeam.position = dropTarget.position;
               targetChamber.teams.push(movedTeam);
             }
-
             sourceTeam.members.forEach((m) =>
               updateHistory(m.name, dropTarget.position)
             );
           }
         } else if (dropTarget.type === "spectator") {
-          // Move all team members to spectators
           const sourceChamber = newChambers[draggedItem.chamberIdx];
           const sourceTeamIdx = sourceChamber.teams.findIndex(
             (t) => t.id === sourceTeam.id
           );
-
           if (sourceTeamIdx !== -1) {
-            sourceTeam.members.forEach((member) => {
-              newSpectators.push(member);
-            });
-            // Remove the team
+            sourceTeam.members.forEach((member) => newSpectators.push(member));
             sourceChamber.teams.splice(sourceTeamIdx, 1);
           }
         }
       }
-
       setPositionHistory(newHistory);
       setChambers(newChambers);
       setSpectators(newSpectators);
-
-      // Validate no duplicates exist (safety check)
       setTimeout(() => {
-        const allPeople = [];
-        const duplicates = new Set();
-
+        const allPeople = [],
+          duplicates = new Set();
         chambers.forEach((chamber) => {
-          chamber.teams.forEach((team) => {
+          chamber.teams.forEach((team) =>
             team.members.forEach((member) => {
-              if (allPeople.includes(member.name)) {
-                duplicates.add(member.name);
-              } else {
-                allPeople.push(member.name);
-              }
-            });
-          });
+              if (allPeople.includes(member.name)) duplicates.add(member.name);
+              else allPeople.push(member.name);
+            })
+          );
           if (chamber.ironPerson) {
-            if (allPeople.includes(chamber.ironPerson.name)) {
+            if (allPeople.includes(chamber.ironPerson.name))
               duplicates.add(chamber.ironPerson.name);
-            } else {
-              allPeople.push(chamber.ironPerson.name);
-            }
+            else allPeople.push(chamber.ironPerson.name);
           }
-          if (chamber.judges) {
+          if (chamber.judges)
             chamber.judges.forEach((judge) => {
-              if (allPeople.includes(judge.name)) {
-                duplicates.add(judge.name);
-              } else {
-                allPeople.push(judge.name);
-              }
+              if (allPeople.includes(judge.name)) duplicates.add(judge.name);
+              else allPeople.push(judge.name);
             });
-          }
         });
-
         if (duplicates.size > 0) {
           console.error("Duplicates detected:", Array.from(duplicates));
           setAlerts((prev) => [
@@ -1348,7 +1008,6 @@ function App() {
         },
       ]);
     } finally {
-      // Always clear drag state, even if there's an error
       setDraggedItem(null);
       setDragOverTarget(null);
     }
@@ -1357,33 +1016,31 @@ function App() {
   const exportToCSV = () => {
     let csv =
       "Session Date,Chamber,Round Type,Position,Team Member 1,Team Member 2,Judges\n";
-
     chambers.forEach((chamber) => {
       const positions = ROUND_TYPES[chamber.roundType].positions;
       const judgeNames =
-        chamber.judges && chamber.judges.length > 0
+        chamber.judges?.length > 0
           ? chamber.judges.map((j) => j.name.replace(/,/g, " ")).join("; ")
           : "No Judge";
-
       positions.forEach((pos) => {
         const team = chamber.teams.find((t) => t.position === pos);
         if (team) {
-          const member1 = team.members[0]?.name.replace(/,/g, " ") || "";
-          const member2 = team.members[1]?.name.replace(/,/g, " ") || "";
-          const roundTypeLabel = ROUND_TYPES[chamber.roundType].label;
-          csv += `${sessionDate},${chamber.room},${roundTypeLabel},${POSITION_NAMES[pos]},${member1},${member2},${judgeNames}\n`;
+          const member1 = team.members[0]?.name.replace(/,/g, " ") || "",
+            member2 = team.members[1]?.name.replace(/,/g, " ") || "";
+          csv += `${sessionDate},${chamber.room},${
+            ROUND_TYPES[chamber.roundType].label
+          },${POSITION_NAMES[pos]},${member1},${member2},${judgeNames}\n`;
         }
       });
-
       if (chamber.hasIron && chamber.ironPerson && chamber.ironPosition) {
         const ironName = chamber.ironPerson.name.replace(/,/g, " ");
-        const roundTypeLabel = ROUND_TYPES[chamber.roundType].label;
-        csv += `${sessionDate},${chamber.room},${roundTypeLabel},${
+        csv += `${sessionDate},${chamber.room},${
+          ROUND_TYPES[chamber.roundType].label
+        },${
           POSITION_NAMES[chamber.ironPosition]
         } (Iron),${ironName},,${judgeNames}\n`;
       }
     });
-
     const blob = new Blob([csv], { type: "text/csv" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1395,12 +1052,10 @@ function App() {
 
   const exportHistory = () => {
     let csv = "Debater,Position History (Oldest to Newest)\n";
-    Object.entries(positionHistory).forEach(([name, history]) => {
-      csv += `${name.replace(/,/g, " ")},"${history.join(
-        " ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ "
-      )}"\n`;
-    });
-
+    Object.entries(positionHistory).forEach(
+      ([name, history]) =>
+        (csv += `${name.replace(/,/g, " ")},"${history.join(" → ")}"\n`)
+    );
     const blob = new Blob([csv], { type: "text/csv" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1422,67 +1077,103 @@ function App() {
       setAlerts([{ type: "success", message: "Position history cleared" }]);
     }
   };
-
   const updateRoomName = (chamberIdx, newName) => {
     const newChambers = [...chambers];
     newChambers[chamberIdx].room = newName;
     setChambers(newChambers);
   };
 
-  const exportDisplayAsPNG = () => {
-    const element = document.getElementById("display-export");
-    if (!element) return;
-
-    const printWindow = window.open("", "", "width=1200,height=800");
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Debate Pairings - ${sessionDate}</title>
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; padding: 24px; background: white; color: #111827; line-height: 1.5; }
-            .text-center { text-align: center; }
-            .mb-6 { margin-bottom: 1.5rem; }
-            .pb-4 { padding-bottom: 1rem; }
-            .border-b-2 { border-bottom: 2px solid #d1d5db; }
-            .text-2xl { font-size: 1.5rem; line-height: 2rem; }
-            .font-bold { font-weight: 700; }
-            .text-gray-900 { color: #111827; }
-            .grid { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
-            .chamber-card { border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; background-color: white; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); page-break-inside: avoid; break-inside: avoid; }
-            .chamber-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; }
-            .chamber-title { font-size: 1.125rem; font-weight: 600; color: #111827; }
-            .badge { display: inline-block; padding: 0.25rem 0.5rem; font-size: 0.75rem; font-weight: 500; border-radius: 0.25rem; margin-left: 0.5rem; }
-            .badge-blue { background-color: #dbeafe; color: #1e40af; }
-            .badge-yellow { background-color: #fef3c7; color: #92400e; }
-            .badge-purple { background-color: #e9d5ff; color: #6b21a8; }
-            .section { margin-bottom: 1rem; }
-            .section-title { font-weight: 500; font-size: 0.875rem; color: #374151; margin-bottom: 0.5rem; }
-            .position-box { border: 1px solid #e5e7eb; border-radius: 0.375rem; padding: 0.75rem; background-color: #f9fafb; margin-bottom: 0.5rem; }
-            .position-label { font-weight: 500; font-size: 0.75rem; color: #6b7280; margin-bottom: 0.25rem; }
-            .team-member { font-weight: 500; font-size: 0.875rem; color: #111827; }
-            .experience { font-size: 0.75rem; color: #6b7280; margin-top: 0.25rem; }
-            .empty-slot { font-size: 0.875rem; color: #9ca3af; font-style: italic; }
-            .judge-section { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb; display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
-            .judge-label { font-weight: 500; }
-            .no-judge { color: #dc2626; }
-            .iron-section { margin-top: 0.75rem; padding: 0.75rem; background-color: #fef3c7; border: 1px solid #fcd34d; border-radius: 0.375rem; font-size: 0.875rem; }
-            .iron-label { font-weight: 600; color: #92400e; }
-            .spectators { margin-top: 1.5rem; padding: 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; background-color: #f9fafb; page-break-inside: avoid; }
-            .spectators-title { font-size: 1.125rem; font-weight: 600; margin-bottom: 0.75rem; color: #111827; }
-            .spectator-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-            .spectator-badge { padding: 0.25rem 0.75rem; background-color: white; border: 1px solid #d1d5db; border-radius: 9999px; font-size: 0.875rem; }
-            @media print { body { padding: 12px; } .chamber-card { box-shadow: none; border: 1px solid #d1d5db; } .grid { gap: 1rem; } }
-            @page { margin: 0.5in; }
-          </style>
-        </head>
-        <body>
-          ${element.innerHTML}
-          <script>window.onload = function() { setTimeout(function() { window.print(); }, 250); };</script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+  const renderPositionBox = (chamber, chamberIdx, pos) => {
+    const team = chamber.teams.find((t) => t.position === pos);
+    const isDropZone =
+      dragOverTarget?.type === "position" &&
+      dragOverTarget.chamberIdx === chamberIdx &&
+      dragOverTarget.position === pos;
+    return (
+      <div
+        key={pos}
+        className={`border rounded-lg p-4 transition-all ${
+          isDropZone ? "bg-blue-100 border-blue-400 border-2" : "bg-gray-50"
+        }`}
+        onDragOver={handleDragOver}
+        onDragEnter={(e) =>
+          handleDragEnter(e, { type: "position", chamberIdx, position: pos })
+        }
+        onDragLeave={handleDragLeave}
+        onDrop={(e) =>
+          handleDrop(e, { type: "position", chamberIdx, position: pos })
+        }
+      >
+        <div className="font-medium text-sm text-gray-600 mb-2">
+          {POSITION_NAMES[pos]}
+        </div>
+        {team && team.members.length > 0 ? (
+          <div className="bg-white rounded p-2 border border-gray-200">
+            <div
+              draggable
+              onDragStart={(e) =>
+                handleDragStart(e, "team", { team, chamberIdx, position: pos })
+              }
+              onDragEnd={handleDragEnd}
+              className="cursor-move flex items-center justify-center mb-2 pb-2 border-b hover:bg-gray-50 p-1 rounded"
+            >
+              <GripVertical className="w-5 h-5 text-blue-500 flex-shrink-0" />
+            </div>
+            {team.members.map((member, memberIdx) => {
+              const isHovered =
+                dragOverTarget?.type === "position" &&
+                dragOverTarget.chamberIdx === chamberIdx &&
+                dragOverTarget.position === pos &&
+                dragOverTarget.memberIdx === memberIdx;
+              return (
+                <div
+                  key={member.name}
+                  className={`flex items-start gap-2 py-1 px-2 rounded transition-colors ${
+                    isHovered ? "bg-red-100" : "hover:bg-gray-50"
+                  }`}
+                  onDragEnter={(e) => {
+                    e.stopPropagation();
+                    handleDragEnter(e, {
+                      type: "position",
+                      chamberIdx,
+                      position: pos,
+                      memberIdx,
+                    });
+                  }}
+                >
+                  <div
+                    draggable
+                    onDragStart={(e) => {
+                      e.stopPropagation();
+                      handleDragStart(e, "person", {
+                        person: member,
+                        source: "position",
+                        chamberIdx,
+                        position: pos,
+                      });
+                    }}
+                    onDragEnd={handleDragEnd}
+                    className="cursor-move"
+                  >
+                    <GripVertical className="w-3 h-3 text-gray-400 mt-0.5 flex-shrink-0" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm truncate">
+                      {member.name}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="text-xs text-gray-500 mt-2">{team.experience}</div>
+          </div>
+        ) : (
+          <div className="text-gray-400 italic text-center py-2">
+            Empty - drag people here
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -1534,7 +1225,7 @@ function App() {
         <div className="bg-white rounded-lg shadow-sm mb-6">
           <div className="border-b">
             <div className="flex gap-1 p-1">
-              {["input", "chambers", "display", "history"].map((tab) => (
+              {["input", "chambers", "history"].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -1559,26 +1250,21 @@ function App() {
                   </h3>
                   <ul className="text-sm text-blue-800 space-y-1">
                     <li>
-                      ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ <strong>Inputs:</strong> The Experience
-                      Level input is mandatory
+                      • <strong>Inputs:</strong> The Experience Level input is
+                      mandatory
                     </li>
                     <li>
-                      ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ <strong>Display:</strong> The display tab
-                      is for download and upload to GroupMe
+                      • <strong>Rooms:</strong> You can edit rooms in the
+                      Chambers tab
                     </li>
                     <li>
-                      ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ <strong>Rooms:</strong> You can edit rooms
-                      in the Chambers tab
+                      • <strong>Iron Position:</strong> When there are 7 people
+                      (3 teams + 1), the 7th person "irons" - debates both
+                      speeches for their side
                     </li>
                     <li>
-                      ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ <strong>Iron Position:</strong> When there
-                      are 7 people (3 teams + 1), the 7th person "irons" -
-                      debates both speeches for their side
-                    </li>
-                    <li>
-                      ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ <strong>Dragging:</strong> Drag
-                      individuals or whole teams between positions. Hover to
-                      highlight swap targets
+                      • <strong>Dragging:</strong> Drag individuals or whole
+                      teams between positions. Hover to highlight swap targets
                     </li>
                   </ul>
                 </div>
@@ -1588,7 +1274,6 @@ function App() {
                     <FileSpreadsheet className="w-5 h-5" />
                     Import Data
                   </h3>
-
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1604,9 +1289,8 @@ function App() {
                             const reader = new FileReader();
                             reader.onload = (event) => {
                               const csvText = event.target?.result;
-                              if (typeof csvText === "string") {
+                              if (typeof csvText === "string")
                                 handleManualInput(csvText);
-                              }
                               setLoading(false);
                             };
                             reader.onerror = () => {
@@ -1792,136 +1476,10 @@ function App() {
                             </h5>
                             {ROUND_TYPES[chamber.roundType].positions
                               .filter((p) => p.includes("G"))
-                              .map((pos) => {
-                                const team = chamber.teams.find(
-                                  (t) => t.position === pos
-                                );
-                                const isDropZone =
-                                  dragOverTarget?.type === "position" &&
-                                  dragOverTarget.chamberIdx === chamberIdx &&
-                                  dragOverTarget.position === pos;
-
-                                return (
-                                  <div
-                                    key={pos}
-                                    className={`border rounded-lg p-4 transition-all ${
-                                      isDropZone
-                                        ? "bg-blue-100 border-blue-400 border-2"
-                                        : "bg-gray-50"
-                                    }`}
-                                    onDragOver={handleDragOver}
-                                    onDragEnter={(e) =>
-                                      handleDragEnter(e, {
-                                        type: "position",
-                                        chamberIdx,
-                                        position: pos,
-                                      })
-                                    }
-                                    onDragLeave={handleDragLeave}
-                                    onDrop={(e) =>
-                                      handleDrop(e, {
-                                        type: "position",
-                                        chamberIdx,
-                                        position: pos,
-                                      })
-                                    }
-                                  >
-                                    <div className="font-medium text-sm text-gray-600 mb-2">
-                                      {POSITION_NAMES[pos]}
-                                    </div>
-                                    {team && team.members.length > 0 ? (
-                                      <div className="bg-white rounded p-2 border border-gray-200">
-                                        {/* Team drag handle */}
-                                        <div
-                                          draggable
-                                          onDragStart={(e) =>
-                                            handleDragStart(e, "team", {
-                                              team,
-                                              chamberIdx,
-                                              position: pos,
-                                            })
-                                          }
-                                          onDragEnd={handleDragEnd}
-                                          className="cursor-move flex items-center justify-center mb-2 pb-2 border-b hover:bg-gray-50 p-1 rounded"
-                                        >
-                                          <GripVertical className="w-5 h-5 text-blue-500 flex-shrink-0" />
-                                        </div>
-
-                                        {/* Individual members */}
-                                        {team.members.map(
-                                          (member, memberIdx) => {
-                                            const isHovered =
-                                              dragOverTarget?.type ===
-                                                "position" &&
-                                              dragOverTarget.chamberIdx ===
-                                                chamberIdx &&
-                                              dragOverTarget.position === pos &&
-                                              dragOverTarget.memberIdx ===
-                                                memberIdx;
-
-                                            return (
-                                              <div
-                                                key={member.name}
-                                                className={`flex items-start gap-2 py-1 px-2 rounded transition-colors ${
-                                                  isHovered
-                                                    ? "bg-red-100"
-                                                    : "hover:bg-gray-50"
-                                                }`}
-                                                onDragEnter={(e) => {
-                                                  e.stopPropagation();
-                                                  // Allow targeting individual members
-                                                  handleDragEnter(e, {
-                                                    type: "position",
-                                                    chamberIdx,
-                                                    position: pos,
-                                                    memberIdx,
-                                                  });
-                                                }}
-                                              >
-                                                <div
-                                                  draggable
-                                                  onDragStart={(e) => {
-                                                    e.stopPropagation();
-                                                    handleDragStart(
-                                                      e,
-                                                      "person",
-                                                      {
-                                                        person: member,
-                                                        source: "position",
-                                                        chamberIdx,
-                                                        position: pos,
-                                                      }
-                                                    );
-                                                  }}
-                                                  onDragEnd={handleDragEnd}
-                                                  className="cursor-move"
-                                                >
-                                                  <GripVertical className="w-3 h-3 text-gray-400 mt-0.5 flex-shrink-0" />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                  <div className="font-medium text-sm truncate">
-                                                    {member.name}
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            );
-                                          }
-                                        )}
-
-                                        <div className="text-xs text-gray-500 mt-2">
-                                          {team.experience}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="text-gray-400 italic text-center py-2">
-                                        Empty - drag people here
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
+                              .map((pos) =>
+                                renderPositionBox(chamber, chamberIdx, pos)
+                              )}
                           </div>
-
                           <div className="space-y-4">
                             <h5 className="font-medium text-gray-700">
                               Opposition
@@ -1930,134 +1488,9 @@ function App() {
                               .filter(
                                 (p) => p.includes("O") && !p.includes("G")
                               )
-                              .map((pos) => {
-                                const team = chamber.teams.find(
-                                  (t) => t.position === pos
-                                );
-                                const isDropZone =
-                                  dragOverTarget?.type === "position" &&
-                                  dragOverTarget.chamberIdx === chamberIdx &&
-                                  dragOverTarget.position === pos;
-
-                                return (
-                                  <div
-                                    key={pos}
-                                    className={`border rounded-lg p-4 transition-all ${
-                                      isDropZone
-                                        ? "bg-blue-100 border-blue-400 border-2"
-                                        : "bg-gray-50"
-                                    }`}
-                                    onDragOver={handleDragOver}
-                                    onDragEnter={(e) =>
-                                      handleDragEnter(e, {
-                                        type: "position",
-                                        chamberIdx,
-                                        position: pos,
-                                      })
-                                    }
-                                    onDragLeave={handleDragLeave}
-                                    onDrop={(e) =>
-                                      handleDrop(e, {
-                                        type: "position",
-                                        chamberIdx,
-                                        position: pos,
-                                      })
-                                    }
-                                  >
-                                    <div className="font-medium text-sm text-gray-600 mb-2">
-                                      {POSITION_NAMES[pos]}
-                                    </div>
-                                    {team && team.members.length > 0 ? (
-                                      <div className="bg-white rounded p-2 border border-gray-200">
-                                        {/* Team drag handle */}
-                                        <div
-                                          draggable
-                                          onDragStart={(e) =>
-                                            handleDragStart(e, "team", {
-                                              team,
-                                              chamberIdx,
-                                              position: pos,
-                                            })
-                                          }
-                                          onDragEnd={handleDragEnd}
-                                          className="cursor-move flex items-center justify-center mb-2 pb-2 border-b hover:bg-gray-50 p-1 rounded"
-                                        >
-                                          <GripVertical className="w-5 h-5 text-blue-500 flex-shrink-0" />
-                                        </div>
-
-                                        {/* Individual members */}
-                                        {team.members.map(
-                                          (member, memberIdx) => {
-                                            const isHovered =
-                                              dragOverTarget?.type ===
-                                                "position" &&
-                                              dragOverTarget.chamberIdx ===
-                                                chamberIdx &&
-                                              dragOverTarget.position === pos &&
-                                              dragOverTarget.memberIdx ===
-                                                memberIdx;
-
-                                            return (
-                                              <div
-                                                key={member.name}
-                                                className={`flex items-start gap-2 py-1 px-2 rounded transition-colors ${
-                                                  isHovered
-                                                    ? "bg-red-100"
-                                                    : "hover:bg-gray-50"
-                                                }`}
-                                                onDragEnter={(e) => {
-                                                  e.stopPropagation();
-                                                  // Allow targeting individual members
-                                                  handleDragEnter(e, {
-                                                    type: "position",
-                                                    chamberIdx,
-                                                    position: pos,
-                                                    memberIdx,
-                                                  });
-                                                }}
-                                              >
-                                                <div
-                                                  draggable
-                                                  onDragStart={(e) => {
-                                                    e.stopPropagation();
-                                                    handleDragStart(
-                                                      e,
-                                                      "person",
-                                                      {
-                                                        person: member,
-                                                        source: "position",
-                                                        chamberIdx,
-                                                        position: pos,
-                                                      }
-                                                    );
-                                                  }}
-                                                  onDragEnd={handleDragEnd}
-                                                  className="cursor-move"
-                                                >
-                                                  <GripVertical className="w-3 h-3 text-gray-400 mt-0.5 flex-shrink-0" />
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                  <div className="font-medium text-sm truncate">
-                                                    {member.name}
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            );
-                                          }
-                                        )}
-
-                                        <div className="text-xs text-gray-500 mt-2">
-                                          {team.experience}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="text-gray-400 italic text-center py-2">
-                                        Empty - drag people here
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
+                              .map((pos) =>
+                                renderPositionBox(chamber, chamberIdx, pos)
+                              )}
                           </div>
                         </div>
 
@@ -2191,7 +1624,7 @@ function App() {
                           <div className="flex items-center gap-2 flex-wrap">
                             <UserCheck className="w-4 h-4 text-blue-600 flex-shrink-0" />
                             <span className="font-medium">Judges:</span>
-                            {chamber.judges && chamber.judges.length > 0 ? (
+                            {chamber.judges?.length > 0 ? (
                               chamber.judges.map((judge, judgeIdx) => (
                                 <div
                                   key={`${judge.name}-${judgeIdx}`}
@@ -2272,222 +1705,6 @@ function App() {
               </div>
             )}
 
-            {activeTab === "display" && (
-              <div className="space-y-6">
-                {chambers.length === 0 ? (
-                  <div className="text-center py-12 text-gray-500">
-                    <Eye className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                    <p>No chambers created. Load data and generate pairings.</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex justify-between items-center mb-4">
-                      <div>
-                        <h3 className="text-lg font-semibold">
-                          Compact View for Download
-                        </h3>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Click Download to save as PDF
-                        </p>
-                      </div>
-                      <button
-                        onClick={exportDisplayAsPNG}
-                        className="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 flex items-center gap-2"
-                      >
-                        <Download className="w-4 h-4" />
-                        Download File (Save as PDF/PNG)
-                      </button>
-                    </div>
-
-                    <div className="bg-white p-6 rounded-lg border border-gray-200">
-                      <div id="display-export">
-                        <div className="text-center mb-6 pb-4 border-b-2 border-gray-300">
-                          <h1 className="text-2xl font-bold text-gray-900">
-                            Trojan Debate Society - {sessionDate}
-                          </h1>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                          {chambers.map((chamber) => (
-                            <div
-                              key={chamber.id}
-                              className="chamber-card border border-gray-200 rounded-lg p-4 bg-white shadow-sm"
-                            >
-                              <div className="chamber-header flex justify-between items-center mb-4 pb-3 border-b border-gray-200">
-                                <h4 className="chamber-title text-lg font-semibold text-gray-900">
-                                  {chamber.room}
-                                </h4>
-                                <div className="flex gap-2">
-                                  <span className="badge badge-blue px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded font-medium">
-                                    {ROUND_TYPES[chamber.roundType].label}
-                                  </span>
-                                  {chamber.hasIron && (
-                                    <span className="badge badge-purple px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded font-medium">
-                                      Iron
-                                    </span>
-                                  )}
-                                  {chamber.mixed && (
-                                    <span className="badge badge-yellow px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded font-medium">
-                                      Mixed
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="space-y-4">
-                                <div className="section">
-                                  <h5 className="section-title font-medium text-sm text-gray-700 mb-2">
-                                    Government
-                                  </h5>
-                                  <div className="space-y-2">
-                                    {ROUND_TYPES[chamber.roundType].positions
-                                      .filter((p) => p.includes("G"))
-                                      .map((pos) => {
-                                        const team = chamber.teams.find(
-                                          (t) => t.position === pos
-                                        );
-                                        return (
-                                          <div
-                                            key={pos}
-                                            className="position-box border border-gray-200 rounded p-3 bg-gray-50"
-                                          >
-                                            <div className="position-label font-medium text-xs text-gray-600 mb-1">
-                                              {POSITION_NAMES[pos]}
-                                            </div>
-                                            {team && team.members.length > 0 ? (
-                                              <>
-                                                {team.members.map((member) => (
-                                                  <div
-                                                    key={member.name}
-                                                    className="team-member font-medium text-sm"
-                                                  >
-                                                    {member.name}
-                                                  </div>
-                                                ))}
-                                                <div className="experience text-xs text-gray-500 mt-1">
-                                                  {team.experience}
-                                                </div>
-                                              </>
-                                            ) : (
-                                              <div className="empty-slot text-sm text-gray-400 italic">
-                                                Empty
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                  </div>
-                                </div>
-
-                                <div className="section">
-                                  <h5 className="section-title font-medium text-sm text-gray-700 mb-2">
-                                    Opposition
-                                  </h5>
-                                  <div className="space-y-2">
-                                    {ROUND_TYPES[chamber.roundType].positions
-                                      .filter(
-                                        (p) =>
-                                          p.includes("O") && !p.includes("G")
-                                      )
-                                      .map((pos) => {
-                                        const team = chamber.teams.find(
-                                          (t) => t.position === pos
-                                        );
-                                        return (
-                                          <div
-                                            key={pos}
-                                            className="position-box border border-gray-200 rounded p-3 bg-gray-50"
-                                          >
-                                            <div className="position-label font-medium text-xs text-gray-600 mb-1">
-                                              {POSITION_NAMES[pos]}
-                                            </div>
-                                            {team && team.members.length > 0 ? (
-                                              <>
-                                                {team.members.map((member) => (
-                                                  <div
-                                                    key={member.name}
-                                                    className="team-member font-medium text-sm"
-                                                  >
-                                                    {member.name}
-                                                  </div>
-                                                ))}
-                                                <div className="experience text-xs text-gray-500 mt-1">
-                                                  {team.experience}
-                                                </div>
-                                              </>
-                                            ) : (
-                                              <div className="empty-slot text-sm text-gray-400 italic">
-                                                Empty
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {chamber.hasIron && chamber.ironPerson && (
-                                <div className="iron-section mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
-                                  <span className="iron-label font-semibold text-yellow-900">
-                                    Iron:
-                                  </span>
-                                  <span className="text-yellow-800 ml-2">
-                                    {chamber.ironPerson.name}
-                                  </span>
-                                  <span className="text-xs text-yellow-700 ml-2">
-                                    ({POSITION_NAMES[chamber.ironPosition]})
-                                  </span>
-                                </div>
-                              )}
-
-                              <div className="judge-section mt-4 pt-3 border-t border-gray-200 flex items-center gap-2 text-sm flex-wrap">
-                                <span className="judge-label font-medium">
-                                  Judges:
-                                </span>
-                                {chamber.judges && chamber.judges.length > 0 ? (
-                                  chamber.judges.map((judge, idx) => (
-                                    <span key={idx}>
-                                      {judge.name}
-                                      {idx < chamber.judges.length - 1
-                                        ? ", "
-                                        : ""}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="no-judge text-red-600">
-                                    No judge assigned
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        {spectators.length > 0 && (
-                          <div className="spectators border border-gray-200 rounded-lg p-4 bg-gray-50 mt-6">
-                            <h4 className="spectators-title text-lg font-semibold mb-3 text-gray-900">
-                              Spectators ({spectators.length})
-                            </h4>
-                            <div className="spectator-list flex flex-wrap gap-2">
-                              {spectators.map((person, idx) => (
-                                <span
-                                  key={idx}
-                                  className="spectator-badge px-3 py-1 bg-white rounded-full text-sm border border-gray-300"
-                                >
-                                  {person.name || person}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
             {activeTab === "history" && (
               <div className="space-y-4">
                 <div className="flex justify-between items-center mb-4">
@@ -2513,7 +1730,6 @@ function App() {
                 </div>
                 {Object.keys(positionHistory).length === 0 ? (
                   <div className="text-center py-12 text-gray-500">
-                    <Eye className="w-12 h-12 mx-auto mb-4 text-gray-400" />
                     <p>No position history available yet.</p>
                   </div>
                 ) : (
