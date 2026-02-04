@@ -9,7 +9,7 @@ export const shuffleArray = (array) => {
 
 export const filterByRole = (participants, roleKeyword) =>
   participants.filter((p) =>
-    (p.role || "").toLowerCase().trim().includes(roleKeyword)
+    (p.role || "").toLowerCase().trim().includes(roleKeyword),
   );
 
 export const isDebater = (person) => {
@@ -17,15 +17,13 @@ export const isDebater = (person) => {
   return !role || role.includes("debat") || role === "";
 };
 
-export const normalizeExperience = (exp) =>
-  exp === "General Member" ? "General Members" : exp;
-
 export const flattenTeamsToPeople = (teams) =>
   teams.flatMap((team) => team.members);
 
 export const parseCSVLine = (line) => {
   const result = [];
-  let current = "", inQuotes = false;
+  let current = "",
+    inQuotes = false;
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
     if (char === '"') inQuotes = !inQuotes;
