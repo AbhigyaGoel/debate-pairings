@@ -406,7 +406,7 @@ function SearchStep({ members, onSelectMember, onWalkIn }) {
   );
 }
 
-function CheckedInCard({ checkIn, onUpdate, paired }) {
+function CheckedInCard({ checkIn, onUpdate, onLeave, paired }) {
   const [editing, setEditing] = useState(false);
   const [partnerMode, setPartnerMode] = useState(checkIn.partner ? "partner" : "solo");
   const [partnerName, setPartnerName] = useState(checkIn.partner || "");
@@ -436,15 +436,17 @@ function CheckedInCard({ checkIn, onUpdate, paired }) {
       <div className="glass rounded-2xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-gray-900">{checkIn.name}</h3>
-          {!editing && (
-            <button
-              onClick={() => setEditing(true)}
-              className="flex items-center gap-1 text-xs text-indigo-500 active:text-indigo-600 px-2 py-1 rounded-lg transition-colors duration-150"
-            >
-              <Edit2 className="w-3 h-3" />
-              Edit
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {!editing && (
+              <button
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-1 text-xs text-indigo-500 active:text-indigo-600 px-2 py-1 rounded-lg transition-colors duration-150"
+              >
+                <Edit2 className="w-3 h-3" />
+                Edit
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex gap-2">
@@ -541,17 +543,27 @@ function CheckedInCard({ checkIn, onUpdate, paired }) {
           </div>
         )}
       </div>
+
+      {onLeave && (
+        <button
+          onClick={onLeave}
+          className="flex items-center gap-1 text-sm text-indigo-500 active:text-indigo-600 py-1 mt-3 transition-colors duration-150"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back
+        </button>
+      )}
     </div>
   );
 }
 
-export function CheckInView({ members, myCheckIn, session, onCheckIn, onUpdateCheckIn }) {
+export function CheckInView({ members, myCheckIn, session, onCheckIn, onUpdateCheckIn, onLeave }) {
   const [codeVerified, setCodeVerified] = useState(false);
   const [step, setStep] = useState("search");
   const [confirmData, setConfirmData] = useState(null);
 
   if (myCheckIn) {
-    return <CheckedInCard checkIn={myCheckIn} onUpdate={onUpdateCheckIn} paired={session?.status === "paired"} />;
+    return <CheckedInCard checkIn={myCheckIn} onUpdate={onUpdateCheckIn} onLeave={onLeave} paired={session?.status === "paired"} />;
   }
 
   if (session?.joinCode && !codeVerified) {

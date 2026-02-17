@@ -655,6 +655,7 @@ function AppContent() {
                   session={session}
                   onCheckIn={checkInAndAutoRoster}
                   onUpdateCheckIn={updateCheckIn}
+                  onLeave={() => myCheckIn && removeCheckIn(myCheckIn.id)}
                 />
               </div>
 
