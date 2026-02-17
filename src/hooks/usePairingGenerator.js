@@ -4,11 +4,43 @@ import {
   isDebater,
   shuffleArray,
   flattenTeamsToPeople,
+  normalizeName,
 } from "../utils/helpers";
-import {
-  MAX_SPECTATOR_PROPAGATION_ITERATIONS,
-  IRON_SCENARIOS,
-} from "../utils/constants";
+import { IRON_SCENARIOS } from "../utils/constants";
+
+// Fuzzy partner lookup: exact → case-insensitive → first-name → substring
+const findPartnerMatch = (partnerName, debaters, processed, requesterName) => {
+  const lower = partnerName.toLowerCase().trim();
+  if (!lower) return null;
+  const isCandidate = (o) => !processed.has(o.name) && o.name !== requesterName;
+
+  // Exact match
+  let match = debaters.find(
+    (o) => o.name === partnerName && isCandidate(o)
+  );
+  if (match) return match;
+
+  // Case-insensitive full match
+  match = debaters.find(
+    (o) => normalizeName(o.name) === normalizeName(partnerName) && isCandidate(o)
+  );
+  if (match) return match;
+
+  // partnerName matches the start of someone's full name (e.g. "Cameron" → "Cameron Coolidge")
+  match = debaters.find(
+    (o) => o.name.toLowerCase().startsWith(lower) && isCandidate(o)
+  );
+  if (match) return match;
+
+  // partnerName is contained in someone's full name (e.g. "Abhigya" in "Abhigya Goel")
+  match = debaters.find(
+    (o) => o.name.toLowerCase().includes(lower) && isCandidate(o)
+  );
+  if (match) return match;
+
+  return null;
+};
+
 
 const createIronChamber = (allPeople, chamberCount, roundType = "full") => {
   const ironPerson = allPeople.pop();
@@ -34,7 +66,8 @@ const createIronChamber = (allPeople, chamberCount, roundType = "full") => {
 };
 
 export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
-  const createTeams = useCallback(() => {
+  const createTeams = useCallback((overrideParticipants) => {
+    const p = overrideParticipants || participants;
     const teams = [],
       processed = new Set();
     const singles = {
@@ -42,58 +75,18 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
       General: [],
     };
 
-    const judgeList = filterByRole(participants, "judg");
-    const explicitSpectators = filterByRole(participants, "spectat");
-    const debaters = participants.filter(isDebater);
+    const judgeList = filterByRole(p, "judg");
+    const explicitSpectators = filterByRole(p, "spectat");
+    const debaters = p.filter(isDebater);
 
-    const spectatorNames = new Set();
-    explicitSpectators.forEach((s) => spectatorNames.add(s.name));
-
-    const propagateSpectators = () => {
-      let changed = false;
-      participants.forEach((person) => {
-        const partnerName = (person.partner || "").trim();
-        if (
-          spectatorNames.has(person.name) &&
-          partnerName &&
-          !spectatorNames.has(partnerName)
-        ) {
-          spectatorNames.add(partnerName);
-          changed = true;
-        }
-        if (
-          partnerName &&
-          spectatorNames.has(partnerName) &&
-          !spectatorNames.has(person.name)
-        ) {
-          spectatorNames.add(person.name);
-          changed = true;
-        }
-      });
-      return changed;
-    };
-
-    let iterations = 0;
-    while (
-      propagateSpectators() &&
-      iterations < MAX_SPECTATOR_PROPAGATION_ITERATIONS
-    ) {
-      iterations++;
-    }
-
-    const allSpectators = participants.filter((person) =>
-      spectatorNames.has(person.name),
-    );
-    const activeDebaters = debaters.filter((p) => !spectatorNames.has(p.name));
+    const activeDebaters = [...debaters];
 
     activeDebaters.forEach((person) => {
       if (processed.has(person.name)) return;
       const partnerName = (person.partner || "").trim();
 
       if (partnerName) {
-        let partner = activeDebaters.find(
-          (other) => other.name === partnerName && !processed.has(other.name),
-        );
+        let partner = findPartnerMatch(partnerName, activeDebaters, processed, person.name);
 
         if (partner && partner.experience !== person.experience) {
           setAlerts((prev) => [
@@ -159,7 +152,7 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
       }
     });
 
-    setSpectators(allSpectators);
+    setSpectators(explicitSpectators);
     return { teams, judges: judgeList };
   }, [participants, setSpectators, setAlerts]);
 

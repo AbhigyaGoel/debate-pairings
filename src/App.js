@@ -1,82 +1,359 @@
-import React, { useState, useCallback } from "react";
-import { Calendar } from "lucide-react";
+import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { Calendar, Shield, LogOut, Play, Square, Edit2, Check, X } from "lucide-react";
 import { DragDropProvider } from "./contexts/DragDropContext";
+import { AuthProvider, useAuthContext } from "./contexts/AuthContext";
 import { Alert } from "./components/Alert";
-import { DataInputTab } from "./components/DataInputTab";
+import { AdminLoginModal } from "./components/AdminLoginModal";
+import { RosterTab } from "./components/RosterTab";
+import { SessionTab } from "./components/SessionTab";
+import { CheckInView } from "./components/CheckInView";
 import { ChambersTab } from "./components/ChambersTab";
+import { TouchDragLayer } from "./components/TouchDragLayer";
 import { DisplayTab } from "./components/DisplayTab";
-import { HistoryTab } from "./components/HistoryTab";
+import { SessionsTab } from "./components/SessionsTab";
+import { AttendanceTab } from "./components/AttendanceTab";
 import { useAutoScroll } from "./hooks/useAutoScroll";
-import { useCSVParser } from "./hooks/useCSVParser";
+import { useMembers } from "./hooks/useMembers";
+import { useSession } from "./hooks/useSession";
 import { usePairingGenerator } from "./hooks/usePairingGenerator";
 import { usePositionAssignment } from "./hooks/usePositionAssignment";
 import { useDragDropHandlers } from "./hooks/useDragDropHandlers";
+import { useSessionHistory } from "./hooks/useSessionHistory";
+import { useAttendance } from "./hooks/useAttendance";
 import { useDragDrop } from "./contexts/DragDropContext";
-import { shuffleArray } from "./utils/helpers";
+import { shuffleArray, normalizeName, normalizeRole, removePersonFromPairings } from "./utils/helpers";
 import { ROUND_TYPES, POSITION_NAMES } from "./utils/constants";
+import { loadOrgPositionHistory, saveOrgPositionHistory, updateSessionName, saveMotionDrop, clearMotionDrop } from "./services/sessionService";
 
 function AppContent() {
-  const [participants, setParticipants] = useState([]);
+  const { user, isAdmin, adminName, loading: authLoading, loginAsAdmin, logout } =
+    useAuthContext();
+  const [showAdminModal, setShowAdminModal] = useState(false);
+
+  const { members, loading: membersLoading, addMember, updateMember, removeMember, clearRoster, importFromCSV } =
+    useMembers(user);
+
+  const {
+    session, sessionLoading, checkins, myCheckIn,
+    startSession, endSession, markPaired,
+    checkIn, adminCheckIn, updateCheckIn, removeCheckIn,
+    savePairings, saveSessionPositions,
+  } = useSession(user);
+
   const [positionHistory, setPositionHistory] = useState({});
+  const [sessionPositions, setSessionPositions] = useState({});
   const [chambers, setChambers] = useState([]);
   const [spectators, setSpectators] = useState([]);
   const [alerts, setAlerts] = useState([]);
-  const [activeTab, setActiveTab] = useState("input");
+  const [activeTab, setActiveTab] = useState(isAdmin ? "session" : "display");
   const [sessionDate, setSessionDate] = useState(
     new Date().toISOString().split("T")[0]
   );
   const [loading, setLoading] = useState(false);
 
+  const {
+    closedSessions, expandedSessionId, checkinCache,
+    loading: sessionsLoading, loadSessions,
+    expandSession, renameSession, deleteSessionFull,
+  } = useSessionHistory();
+
+  const {
+    dates: attendanceDates, memberRows: attendanceMemberRows,
+    summary: attendanceSummary, loading: attendanceLoading,
+    progress: attendanceProgress, loadAttendance, invalidateCache: invalidateAttendanceCache,
+    toggleAttendance,
+  } = useAttendance(members, checkins, session?.date);
+
+  // Wrap checkIn to auto-add walk-ins to roster
+  const checkInAndAutoRoster = useCallback(async (memberData) => {
+    const result = await checkIn(memberData);
+    // If this person isn't on the roster, add them
+    const norm = normalizeName(memberData.name);
+    const onRoster = members.some((m) => normalizeName(m.name) === norm);
+    if (!onRoster) {
+      try {
+        await addMember({ name: memberData.name, experience: memberData.experience || "General" });
+      } catch (err) {
+        console.error("Failed to auto-add walk-in to roster:", err);
+      }
+    }
+    return result;
+  }, [checkIn, members, addMember]);
+
+  const [editingSessionName, setEditingSessionName] = useState(false);
+  const [sessionNameDraft, setSessionNameDraft] = useState("");
+
   const { draggedItem } = useDragDrop();
   useAutoScroll(draggedItem);
 
-  const { handleCSVInput } = useCSVParser(setParticipants, setAlerts);
+  const rosterParticipants = useMemo(() =>
+    members.map((m) => ({
+      name: m.name,
+      partner: "",
+      experience: m.experience || "General",
+      preference: "No Preference",
+      halfRound: "",
+      role: "Debate",
+    })),
+    [members]
+  );
+
+  const sessionParticipants = useMemo(() =>
+    checkins.map((c) => ({
+      name: c.name,
+      partner: c.partner || "",
+      experience: c.experience || "General",
+      preference: c.preference || "No Preference",
+      halfRound: c.halfRound || "",
+      role: normalizeRole(c.role),
+    })),
+    [checkins]
+  );
+
+  const participants = sessionParticipants.length > 0 ? sessionParticipants : rosterParticipants;
+
   const { createTeams, createChambers: generateChambers } = usePairingGenerator(
     participants,
     setSpectators,
     setAlerts
   );
-  const { getNextPosition, assignPositionsInChamber } =
+  const { assignPositionsInChamber } =
     usePositionAssignment(positionHistory);
+
+  // Switch to "session" tab when admin logs in (useState initial value was set before auth resolved)
+  useEffect(() => {
+    if (isAdmin && activeTab === "display") setActiveTab("session");
+  }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dragDropHandlers = useDragDropHandlers(
     chambers,
     setChambers,
     spectators,
     setSpectators,
-    positionHistory,
-    setPositionHistory,
+    sessionPositions,
+    setSessionPositions,
     setAlerts
   );
 
-  const handleCSVUpload = useCallback(
-    (e) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        setLoading(true);
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const csvText = event.target?.result;
-          if (typeof csvText === "string") handleCSVInput(csvText);
-          setLoading(false);
-        };
-        reader.onerror = () => {
-          setAlerts([{ type: "error", message: "Failed to read CSV file" }]);
-          setLoading(false);
-        };
-        reader.readAsText(file);
+  const isSyncing = useRef(false);
+  const saveTimerRef = useRef(null);
+
+  // Debounced auto-save chambers/spectators to Firestore (500ms)
+  useEffect(() => {
+    if (isSyncing.current) return;
+    if (chambers.length > 0 && session?.status === "paired") {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        savePairings(chambers, spectators).catch((err) =>
+          console.error("Failed to save pairings to Firestore:", err)
+        );
+      }, 500);
+    }
+    return () => clearTimeout(saveTimerRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chambers, session?.status]);
+
+  // Load org-level position history on mount
+  useEffect(() => {
+    loadOrgPositionHistory()
+      .then(setPositionHistory)
+      .catch((err) => console.error("Failed to load org position history:", err));
+  }, []);
+
+  // Sync chambers/spectators/sessionPositions from Firestore
+  // Only apply remote data if we're not in the middle of a local edit (debounce timer pending)
+  useEffect(() => {
+    if (!session) {
+      setChambers([]);
+      setSpectators([]);
+      setSessionPositions({});
+      return;
+    }
+    // Skip sync if a local save is pending (user is actively editing)
+    if (saveTimerRef.current) return;
+    isSyncing.current = true;
+    if (session.chambers) setChambers(session.chambers);
+    if (session.spectators) setSpectators(session.spectators || []);
+    if (session.sessionPositions) setSessionPositions(session.sessionPositions || {});
+    setTimeout(() => { isSyncing.current = false; }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
+
+  // Auto-save session positions to session doc
+  useEffect(() => {
+    if (isSyncing.current) return;
+    if (Object.keys(sessionPositions).length > 0 && session?.id) {
+      saveSessionPositions(sessionPositions).catch((err) =>
+        console.error("Failed to save session positions:", err)
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionPositions, session?.id]);
+
+  const handleDeleteSession = useCallback(async (sessionId) => {
+    try {
+      const updatedHistory = await deleteSessionFull(sessionId);
+      invalidateAttendanceCache();
+      if (updatedHistory) {
+        setPositionHistory(updatedHistory);
+        setAlerts([{ type: "success", message: "Session deleted and position history updated" }]);
+      } else {
+        setAlerts([{ type: "success", message: "Session deleted (no position data to remove)" }]);
+      }
+    } catch (err) {
+      setAlerts([{ type: "error", message: "Failed to delete session: " + err.message }]);
+    }
+  }, [deleteSessionFull, invalidateAttendanceCache]);
+
+  const handleSaveSessionName = useCallback(async () => {
+    const trimmed = sessionNameDraft.trim();
+    if (!trimmed || !session?.id) return;
+    try {
+      await updateSessionName(session.id, trimmed);
+      setEditingSessionName(false);
+    } catch (err) {
+      setAlerts([{ type: "error", message: "Failed to rename session: " + err.message }]);
+    }
+  }, [sessionNameDraft, session?.id]);
+
+  const handleStartSession = useCallback(async () => {
+    try {
+      await startSession(adminName);
+      setActiveTab("session");
+      setChambers([]);
+      setSpectators([]);
+      setSessionPositions({});
+      setAlerts([{ type: "success", message: "Session started — debaters can now check in" }]);
+    } catch (err) {
+      setAlerts([{ type: "error", message: "Failed to start session: " + err.message }]);
+    }
+  }, [startSession, adminName]);
+
+  const handleEndSession = useCallback(async () => {
+    if (!window.confirm("End the current session? Debaters will no longer be able to check in.")) return;
+    try {
+      // Merge current session positions into org-level history
+      if (Object.keys(sessionPositions).length > 0) {
+        const merged = { ...positionHistory };
+        Object.entries(sessionPositions).forEach(([name, positions]) => {
+          if (!merged[name]) merged[name] = [];
+          else merged[name] = [...merged[name]];
+          merged[name].push(...positions);
+        });
+        setPositionHistory(merged);
+        await saveOrgPositionHistory(merged);
+      }
+      await endSession();
+      setChambers([]);
+      setSpectators([]);
+      setSessionPositions({});
+      invalidateAttendanceCache();
+      setActiveTab("roster");
+      setAlerts([{ type: "success", message: "Session ended" }]);
+    } catch (err) {
+      setAlerts([{ type: "error", message: "Failed to end session: " + err.message }]);
+    }
+  }, [endSession, sessionPositions, positionHistory, invalidateAttendanceCache]);
+
+  const handleUpdateMember = useCallback(
+    async (memberId, updates) => {
+      await updateMember(memberId, updates);
+      if (updates.experience && session) {
+        const member = members.find((m) => m.id === memberId);
+        if (member) {
+          const matchingCheckin = checkins.find(
+            (c) => normalizeName(c.name) === normalizeName(member.name)
+          );
+          if (matchingCheckin) {
+            updateCheckIn(matchingCheckin.id, { experience: updates.experience }).catch((err) =>
+              console.error("Failed to propagate experience to checkin:", err)
+            );
+          }
+        }
       }
     },
-    [handleCSVInput, setAlerts]
+    [updateMember, session, members, checkins, updateCheckIn]
   );
 
-  const generatePairings = useCallback(() => {
+  const handleAdminAdd = useCallback(
+    async (memberData) => {
+      try {
+        await adminCheckIn(memberData);
+      } catch (err) {
+        setAlerts([{ type: "error", message: "Failed to add: " + err.message }]);
+      }
+    },
+    [adminCheckIn]
+  );
+
+  const handleBatchAddToSession = useCallback(
+    async (memberList) => {
+      try {
+        await Promise.all(memberList.map((m) => adminCheckIn(m)));
+        setAlerts([{ type: "success", message: `Added ${memberList.length} members to session` }]);
+      } catch (err) {
+        setAlerts([{ type: "error", message: "Failed to add members: " + err.message }]);
+      }
+    },
+    [adminCheckIn]
+  );
+
+  const handleDropMotion = useCallback(
+    async (motion, infoslide) => {
+      if (!session?.id) return;
+      try {
+        await saveMotionDrop(session.id, motion, infoslide);
+      } catch (err) {
+        setAlerts([{ type: "error", message: "Failed to drop motion: " + err.message }]);
+      }
+    },
+    [session?.id]
+  );
+
+  const handleClearMotion = useCallback(async () => {
+    if (!session?.id) return;
+    try {
+      await clearMotionDrop(session.id);
+    } catch (err) {
+      setAlerts([{ type: "error", message: "Failed to clear motion: " + err.message }]);
+    }
+  }, [session?.id]);
+
+  const handleRemoveCheckIn = useCallback(
+    (checkinId) => {
+      const checkin = checkins.find((c) => c.id === checkinId);
+      if (checkin) {
+        const result = removePersonFromPairings(checkin.name, chambers, spectators);
+        setChambers(result.chambers);
+        setSpectators(result.spectators);
+      }
+      removeCheckIn(checkinId);
+    },
+    [checkins, chambers, spectators, removeCheckIn]
+  );
+
+  const handleDeleteTeam = useCallback(
+    (chamberIdx, teamId) => {
+      const newChambers = [...chambers];
+      const chamber = newChambers[chamberIdx];
+      const teamIndex = chamber.teams.findIndex((t) => t.id === teamId);
+      if (teamIndex === -1) return;
+      const team = chamber.teams[teamIndex];
+      const membersToSpectate = team.members.map((m) => ({ ...m }));
+      chamber.teams.splice(teamIndex, 1);
+      setSpectators((prev) => [...prev, ...membersToSpectate]);
+      setChambers(newChambers);
+    },
+    [chambers]
+  );
+
+  const generatePairings = useCallback((sourceParticipants) => {
     setAlerts([]);
     setSpectators([]);
     setLoading(true);
 
     try {
-      const result = createTeams();
+      const result = sourceParticipants ? createTeams(sourceParticipants) : createTeams();
       if (!result?.teams) {
         setAlerts([{ type: "error", message: "Failed to create teams" }]);
         setLoading(false);
@@ -124,24 +401,27 @@ function AppContent() {
         }
       });
 
-      const newHistory = { ...positionHistory };
+      const currentPositions = {};
       chamberList.forEach((chamber) => {
         chamber.teams.forEach((team) =>
           team.members.forEach((member) => {
-            if (!newHistory[member.name]) newHistory[member.name] = [];
-            newHistory[member.name].push(team.position);
+            if (!currentPositions[member.name]) currentPositions[member.name] = [];
+            currentPositions[member.name].push(team.position);
           })
         );
         if (chamber.hasIron && chamber.ironPerson && chamber.ironPosition) {
-          if (!newHistory[chamber.ironPerson.name])
-            newHistory[chamber.ironPerson.name] = [];
-          newHistory[chamber.ironPerson.name].push(chamber.ironPosition);
+          if (!currentPositions[chamber.ironPerson.name])
+            currentPositions[chamber.ironPerson.name] = [];
+          currentPositions[chamber.ironPerson.name].push(chamber.ironPosition);
         }
       });
 
-      setPositionHistory(newHistory);
+      setSessionPositions(currentPositions);
       setChambers(chamberList);
       setActiveTab("chambers");
+      if (session) {
+        markPaired();
+      }
       setAlerts((prev) => [
         ...prev,
         {
@@ -159,8 +439,24 @@ function AppContent() {
     createTeams,
     generateChambers,
     assignPositionsInChamber,
-    positionHistory,
+    session,
+    markPaired,
   ]);
+
+  const generateFromRoster = useCallback(() => {
+    generatePairings(rosterParticipants);
+  }, [generatePairings, rosterParticipants]);
+
+  const generateFromSession = useCallback(() => {
+    const checkinDebaters = sessionParticipants.filter(
+      (p) => !p.role || p.role === "Debate"
+    ).length;
+    if (checkinDebaters >= 4) {
+      generatePairings(sessionParticipants);
+    } else {
+      generatePairings(rosterParticipants);
+    }
+  }, [generatePairings, sessionParticipants, rosterParticipants]);
 
   const addChamber = useCallback(() => {
     setChambers([
@@ -218,6 +514,7 @@ function AppContent() {
   );
 
   const exportToCSV = useCallback(() => {
+    const exportDate = session?.date || sessionDate;
     let csv =
       "Session Date,Chamber,Round Type,Position,Team Member 1,Team Member 2,Judges\n";
     chambers.forEach((chamber) => {
@@ -232,7 +529,7 @@ function AppContent() {
         if (team) {
           const member1 = team.members[0]?.name.replace(/,/g, " ") || "";
           const member2 = team.members[1]?.name.replace(/,/g, " ") || "";
-          csv += `${sessionDate},${chamber.room},${
+          csv += `${exportDate},${chamber.room},${
             ROUND_TYPES[chamber.roundType].label
           },${POSITION_NAMES[pos]},${member1},${member2},${judgeNames}\n`;
         }
@@ -255,99 +552,344 @@ function AppContent() {
     a.download = `debate-pairings-${sessionDate}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
-  }, [chambers, sessionDate]);
+  }, [chambers, sessionDate, session]);
 
-  const exportHistory = useCallback(() => {
-    let csv = "Debater,Position History (Oldest to Newest)\n";
-    Object.entries(positionHistory).forEach(
-      ([name, history]) =>
-        (csv += `${name.replace(/,/g, " ")},"${history.join(" â†’ ")}"\n`)
+
+  const sessionActive = session && (session.status === "open" || session.status === "paired");
+  const adminTabs = sessionActive
+    ? ["session", "chambers", "display", "roster", "attendance", "sessions"]
+    : ["roster", "display", "attendance", "sessions"];
+  const viewerTabs = ["display"];
+  const visibleTabs = isAdmin ? adminTabs : viewerTabs;
+
+  const TAB_LABELS = {
+    roster: "Roster",
+    session: "Session",
+    chambers: "Chambers",
+    display: "Round",
+    attendance: "Attendance",
+    sessions: "Sessions",
+  };
+
+  const effectiveTab = visibleTabs.includes(activeTab) ? activeTab : visibleTabs[0];
+
+  // Load closed sessions when Sessions tab is opened
+  useEffect(() => {
+    if (effectiveTab === "sessions") loadSessions();
+  }, [effectiveTab, loadSessions]);
+
+  // Load attendance data when Attendance tab is opened
+  useEffect(() => {
+    if (effectiveTab === "attendance") loadAttendance();
+  }, [effectiveTab, loadAttendance]);
+
+  if (authLoading || sessionLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="glass-spinner" />
+      </div>
     );
+  }
 
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `position-history-${
-      new Date().toISOString().split("T")[0]
-    }.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-  }, [positionHistory]);
-
-  const clearHistory = useCallback(() => {
-    if (
-      window.confirm(
-        "Are you sure you want to clear all position history? This cannot be undone."
-      )
-    ) {
-      setPositionHistory({});
-      setAlerts([{ type: "success", message: "Position history cleared" }]);
-    }
-  }, []);
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto p-6">
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Trojan Debate Society Pairings
-          </h1>
-          <div className="flex items-center gap-4 text-sm text-gray-600">
-            <span className="flex items-center gap-1">
-              <Calendar className="w-4 h-4" />
-              Session: {sessionDate}
-            </span>
-            <input
-              type="date"
-              value={sessionDate}
-              onChange={(e) => setSessionDate(e.target.value)}
-              className="px-3 py-1 border rounded-md"
-            />
-          </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Position history is automatically saved across sessions
-          </p>
-        </div>
-
-        {alerts.map((alert, idx) => (
-          <Alert
-            key={idx}
-            alert={alert}
-            onClose={() => setAlerts(alerts.filter((_, i) => i !== idx))}
-          />
-        ))}
-
-        <div className="bg-white rounded-lg shadow-sm mb-6">
-          <div className="border-b">
-            <div className="flex gap-1 p-1">
-              {["input", "chambers", "display", "history"].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-2 rounded-md font-medium capitalize transition ${
-                    activeTab === tab
-                      ? "bg-blue-500 text-white"
-                      : "text-gray-600 hover:bg-gray-100"
-                  }`}
-                >
-                  {tab === "input" ? "Data Input" : tab}
-                </button>
-              ))}
+  // --- Viewer (non-admin) ---
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen">
+        <div className="max-w-7xl mx-auto p-3 sm:p-6">
+          {/* Header */}
+          <div className="glass-strong rounded-2xl p-4 sm:p-6 mb-4 sm:mb-6">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 mb-1">
+                  Trojan Debate Society
+                </h1>
+                {session && (
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <span className="text-sm text-gray-400">
+                      {session.date}
+                    </span>
+                    {session.status === "open" && (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full font-medium border border-emerald-200">
+                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                        Check-in open
+                      </span>
+                    )}
+                    {session.status === "paired" && (
+                      <span className="inline-flex items-center text-xs text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full font-medium border border-indigo-200">
+                        Pairings posted
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setShowAdminModal(true)}
+                className="flex-shrink-0 flex items-center gap-1.5 text-sm px-3 py-1.5 text-gray-400 hover:text-gray-600 glass-subtle rounded-lg transition-all duration-200 hover:bg-gray-50"
+              >
+                <Shield className="w-4 h-4" />
+                Admin
+              </button>
             </div>
           </div>
 
-          <div className="p-6">
-            {activeTab === "input" && (
-              <DataInputTab
-                participants={participants}
-                loading={loading}
-                onCSVUpload={handleCSVUpload}
-                onGeneratePairings={generatePairings}
+          {showAdminModal && (
+            <AdminLoginModal
+              onLogin={loginAsAdmin}
+              onClose={() => setShowAdminModal(false)}
+            />
+          )}
+
+          {!session ? (
+            <div className="glass rounded-2xl p-4 sm:p-6">
+              <div className="text-center py-16 text-gray-400">
+                <p className="text-lg font-medium">No active session</p>
+                <p className="text-sm mt-1 text-gray-300">Check back when an admin starts a session</p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="glass rounded-2xl p-4 sm:p-6">
+                <CheckInView
+                  members={members}
+                  myCheckIn={myCheckIn}
+                  session={session}
+                  onCheckIn={checkInAndAutoRoster}
+                  onUpdateCheckIn={updateCheckIn}
+                />
+              </div>
+
+              {session.status === "paired" && (session.chambers?.length > 0 || chambers.length > 0) && (
+                <div className="glass rounded-2xl p-4 sm:p-6">
+                  <DisplayTab
+                    chambers={session.chambers || chambers}
+                    spectators={session.spectators || spectators}
+                    sessionDate={session.date}
+                    motion={session.motion}
+                    infoslide={session.infoslide}
+                    motionDroppedAt={session.motionDroppedAt}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // --- Admin ---
+  return (
+    <div className="min-h-screen">
+      <div className="max-w-7xl mx-auto p-3 sm:p-6">
+        {/* Header card */}
+        <div className="glass-strong rounded-2xl p-4 sm:p-6 mb-4 sm:mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 mb-2">
+                Trojan Debate Society
+              </h1>
+              <div className="flex items-center gap-3 text-sm">
+                <span className="flex items-center gap-1.5 text-gray-400">
+                  <Calendar className="w-4 h-4" />
+                  {sessionDate}
+                </span>
+                <input
+                  type="date"
+                  value={sessionDate}
+                  onChange={(e) => setSessionDate(e.target.value)}
+                  className="px-3 py-1 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-200"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {sessionActive ? (
+                <button
+                  onClick={handleEndSession}
+                  className="flex items-center gap-1.5 text-sm px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-all duration-200"
+                >
+                  <Square className="w-4 h-4" />
+                  End Session
+                </button>
+              ) : (
+                <button
+                  onClick={handleStartSession}
+                  className="flex items-center gap-1.5 text-sm px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-all duration-200"
+                >
+                  <Play className="w-4 h-4" />
+                  Start Session
+                </button>
+              )}
+              <span className="text-sm text-indigo-600 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-full font-medium">
+                <Shield className="w-3 h-3 inline mr-1" />
+                {adminName}
+              </span>
+              <button
+                onClick={logout}
+                className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100 transition-all duration-200"
+                title="Exit admin mode"
+                aria-label="Exit admin mode"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          {sessionActive && (
+            <div className="mt-3 sm:mt-4 flex items-center gap-3 flex-wrap">
+              {editingSessionName ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    value={sessionNameDraft}
+                    onChange={(e) => setSessionNameDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleSaveSessionName(); if (e.key === "Escape") setEditingSessionName(false); }}
+                    className="px-2 py-0.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
+                    autoFocus
+                  />
+                  <button onClick={handleSaveSessionName} className="text-emerald-500 hover:text-emerald-600 p-0.5">
+                    <Check className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setEditingSessionName(false)} className="text-gray-300 hover:text-gray-500 p-0.5">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <span
+                  className="inline-flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer hover:text-gray-800 transition-colors duration-150"
+                  onClick={() => { setSessionNameDraft(session.name || `Session - ${sessionDate}`); setEditingSessionName(true); }}
+                >
+                  {session.name || `Session - ${sessionDate}`}
+                  <Edit2 className="w-3.5 h-3.5 text-gray-300" />
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full font-medium border border-emerald-200">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                {checkins.length} checked in
+              </span>
+              {session.joinCode && (
+                <span className="inline-flex items-center gap-1 text-xs font-mono tracking-widest text-gray-500 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded-full">
+                  Join code: {session.joinCode}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {showAdminModal && (
+          <AdminLoginModal
+            onLogin={loginAsAdmin}
+            onClose={() => setShowAdminModal(false)}
+          />
+        )}
+
+        {/* Tab container */}
+        <div className="glass rounded-2xl mb-4 sm:mb-6">
+          <div className="border-b border-gray-100">
+            {/* Desktop: single row */}
+            <div className="hidden sm:flex gap-1 p-1.5">
+              {visibleTabs.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 whitespace-nowrap ${
+                    effectiveTab === tab
+                      ? "glass-strong text-gray-900"
+                      : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  {TAB_LABELS[tab]}
+                  {tab === "session" && checkins.length > 0 && (
+                    <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${
+                      effectiveTab === tab
+                        ? "bg-indigo-100 text-indigo-600"
+                        : "bg-gray-100 text-gray-400"
+                    }`}>
+                      {checkins.length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+            {/* Mobile: two-row grid, split evenly */}
+            <div className="sm:hidden p-1.5 space-y-1">
+              {(() => {
+                const mid = Math.ceil(visibleTabs.length / 2);
+                const row1 = visibleTabs.slice(0, mid);
+                const row2 = visibleTabs.slice(mid);
+                const renderTab = (tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`px-2 py-2 text-xs font-medium rounded-lg transition-all duration-200 whitespace-nowrap flex-1 text-center ${
+                      effectiveTab === tab
+                        ? "glass-strong text-gray-900"
+                        : "text-gray-400 active:bg-gray-100"
+                    }`}
+                  >
+                    {TAB_LABELS[tab]}
+                    {tab === "session" && checkins.length > 0 && (
+                      <span className={`ml-1 text-xs px-1 py-0.5 rounded-full ${
+                        effectiveTab === tab
+                          ? "bg-indigo-100 text-indigo-600"
+                          : "bg-gray-100 text-gray-400"
+                      }`}>
+                        {checkins.length}
+                      </span>
+                    )}
+                  </button>
+                );
+                return (
+                  <>
+                    <div className="flex gap-1">{row1.map(renderTab)}</div>
+                    {row2.length > 0 && (
+                      <div className="flex gap-1">{row2.map(renderTab)}</div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-6">
+            {alerts.map((alert, idx) => (
+              <Alert
+                key={idx}
+                alert={alert}
+                onClose={() => setAlerts(alerts.filter((_, i) => i !== idx))}
+              />
+            ))}
+
+            {effectiveTab === "session" && (
+              <SessionTab
+                checkins={checkins}
+                members={members}
+                onUpdateCheckIn={updateCheckIn}
+                onRemoveCheckIn={handleRemoveCheckIn}
+                onAdminAdd={handleAdminAdd}
+                onGeneratePairings={generateFromSession}
+                pairingLoading={loading}
+                paired={session?.status === "paired"}
+                chambers={chambers}
+                spectators={spectators}
               />
             )}
 
-            {activeTab === "chambers" && (
+            {effectiveTab === "roster" && (
+              <RosterTab
+                members={members}
+                membersLoading={membersLoading}
+                onAddMember={addMember}
+                onUpdateMember={handleUpdateMember}
+                onRemoveMember={removeMember}
+                onClearRoster={clearRoster}
+                onImportCSV={importFromCSV}
+                sessionActive={sessionActive}
+                checkins={checkins}
+                onAddToSession={handleBatchAddToSession}
+                onGeneratePairings={generateFromRoster}
+                pairingLoading={loading}
+              />
+            )}
+
+            {effectiveTab === "chambers" && (
               <ChambersTab
                 chambers={chambers}
                 spectators={spectators}
@@ -355,28 +897,51 @@ function AppContent() {
                 onUpdateRoomName={updateRoomName}
                 onRoundTypeChange={handleRoundTypeChange}
                 onExportCSV={exportToCSV}
+                onDeleteTeam={handleDeleteTeam}
                 {...dragDropHandlers}
               />
             )}
 
-            {activeTab === "display" && (
+            {effectiveTab === "display" && (
               <DisplayTab
                 chambers={chambers}
                 spectators={spectators}
                 sessionDate={sessionDate}
+                motion={session?.motion}
+                infoslide={session?.infoslide}
+                motionDroppedAt={session?.motionDroppedAt}
+                isAdmin
+                onDropMotion={handleDropMotion}
+                onClearMotion={handleClearMotion}
               />
             )}
 
-            {activeTab === "history" && (
-              <HistoryTab
-                positionHistory={positionHistory}
-                onExportHistory={exportHistory}
-                onClearHistory={clearHistory}
-                getNextPosition={getNextPosition}
+            {effectiveTab === "attendance" && (
+              <AttendanceTab
+                loading={attendanceLoading}
+                progress={attendanceProgress}
+                dates={attendanceDates}
+                memberRows={attendanceMemberRows}
+                summary={attendanceSummary}
+                activeSessionDate={session?.date}
+                onToggleAttendance={toggleAttendance}
+              />
+            )}
+
+            {effectiveTab === "sessions" && (
+              <SessionsTab
+                closedSessions={closedSessions}
+                expandedSessionId={expandedSessionId}
+                checkinCache={checkinCache}
+                loading={sessionsLoading}
+                onExpand={expandSession}
+                onRename={renameSession}
+                onDelete={handleDeleteSession}
               />
             )}
           </div>
         </div>
+        <TouchDragLayer onDrop={dragDropHandlers.onDrop} />
       </div>
     </div>
   );
@@ -384,9 +949,11 @@ function AppContent() {
 
 function App() {
   return (
-    <DragDropProvider>
-      <AppContent />
-    </DragDropProvider>
+    <AuthProvider>
+      <DragDropProvider>
+        <AppContent />
+      </DragDropProvider>
+    </AuthProvider>
   );
 }
 

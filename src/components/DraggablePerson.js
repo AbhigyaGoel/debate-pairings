@@ -9,24 +9,15 @@ export const DraggablePerson = ({ person, source, chamberIdx, position, onDragSt
         e.stopPropagation();
         onDragStart(e, "person", { person, source, chamberIdx, position });
       }}
+      onTouchStart={(e) => {
+        e.stopPropagation();
+        onDragStart(e, "person", { person, source, chamberIdx, position });
+      }}
       onDragEnd={onDragEnd}
-      className={`cursor-move ${className}`}
+      className={`cursor-move p-1 -m-1 ${className}`}
     >
-      <GripVertical className="w-3 h-3 text-gray-400 mt-0.5 flex-shrink-0" />
+      <GripVertical className="w-4 h-4 sm:w-3 sm:h-3 text-gray-300 hover:text-gray-500 flex-shrink-0 transition-colors duration-150" />
     </div>
   );
 };
 
-export const DraggablePersonBadge = ({ person, source, chamberIdx, onDragStart, onDragEnd }) => {
-  return (
-    <div
-      draggable
-      onDragStart={(e) => onDragStart(e, "person", { person, source, chamberIdx })}
-      onDragEnd={onDragEnd}
-      className="px-3 py-1 bg-white rounded-full text-sm border cursor-move hover:shadow-md transition-shadow flex items-center gap-1"
-    >
-      <GripVertical className="w-3 h-3 text-gray-400" />
-      <span>{person.name || person}</span>
-    </div>
-  );
-};

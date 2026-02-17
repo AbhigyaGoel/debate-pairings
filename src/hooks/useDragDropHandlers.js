@@ -6,16 +6,21 @@ export const useDragDropHandlers = (
   setChambers,
   spectators,
   setSpectators,
-  positionHistory,
-  setPositionHistory,
+  sessionPositions,
+  setSessionPositions,
   setAlerts
 ) => {
-  const { draggedItem, setDraggedItem, setDragOverTarget } = useDragDrop();
+  const { draggedItem, setDraggedItem, setDragOverTarget, touchStartRef } = useDragDrop();
 
   const handleDragStart = useCallback((e, dragType, data) => {
+    if (e.touches) {
+      const touch = e.touches[0];
+      touchStartRef.current = { x: touch.clientX, y: touch.clientY, dragType, data };
+      return;
+    }
     setDraggedItem({ type: dragType, ...data });
     e.dataTransfer.effectAllowed = 'move';
-  }, [setDraggedItem]);
+  }, [setDraggedItem, touchStartRef]);
 
   const handleDragEnd = useCallback((e) => {
     e.preventDefault();
@@ -25,7 +30,7 @@ export const useDragDropHandlers = (
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
   }, []);
 
   const handleDragEnter = useCallback((e, target) => {
@@ -62,7 +67,7 @@ export const useDragDropHandlers = (
     try {
       const newChambers = [...chambers];
       const newSpectators = [...spectators];
-      let newHistory = { ...positionHistory };
+      let newHistory = { ...sessionPositions };
 
       const updateHistory = (personName, position) => {
         if (!position) return;
@@ -221,7 +226,7 @@ export const useDragDropHandlers = (
         }
       }
 
-      setPositionHistory(newHistory);
+      setSessionPositions(newHistory);
       setChambers(newChambers);
       setSpectators(newSpectators);
     } catch (error) {
@@ -234,7 +239,7 @@ export const useDragDropHandlers = (
       setDraggedItem(null);
       setDragOverTarget(null);
     }
-  }, [draggedItem, chambers, spectators, positionHistory, setDraggedItem, setDragOverTarget, setChambers, setSpectators, setPositionHistory, setAlerts]);
+  }, [draggedItem, chambers, spectators, sessionPositions, setDraggedItem, setDragOverTarget, setChambers, setSpectators, setSessionPositions, setAlerts]);
 
   return {
     onDragStart: handleDragStart,

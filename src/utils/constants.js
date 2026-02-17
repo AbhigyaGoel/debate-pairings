@@ -1,5 +1,12 @@
 export const EXPERIENCE_LEVELS = ["Competitive", "General"];
 
+export const ROLE_OPTIONS = ["Debate", "Judge", "Spectate"];
+
+export const PREFERENCE_OPTIONS = [
+  { value: "Opening Half", label: "Opening" },
+  { value: "Closing Half", label: "Closing" },
+];
+
 export const IRON_SCENARIOS = {
   FULL_ROUND_3_TEAMS: 7,
   FULL_ROUND_2_TEAMS: 5,
