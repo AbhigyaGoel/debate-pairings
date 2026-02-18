@@ -601,7 +601,7 @@ function AppContent() {
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">Chambers</h1>
-                <p className="text-xs text-gray-400">by Abhigya Goel</p>
+                <p className="text-xs text-gray-400">by <a href="https://abhigyagoel.com" target="_blank" rel="noopener noreferrer" className="hover:text-indigo-500 transition-colors duration-150">Abhigya Goel</a></p>
                 {session && (
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <span className="text-sm text-gray-400">
