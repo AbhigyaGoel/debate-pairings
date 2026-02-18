@@ -17,6 +17,7 @@ export function useSession(user) {
   const [session, setSession] = useState(null);
   const [checkins, setCheckins] = useState([]);
   const [sessionLoading, setSessionLoading] = useState(true);
+  const [optimisticCheckIn, setOptimisticCheckIn] = useState(null);
 
   // Subscribe to active session (wait for auth so Firestore rules pass)
   useEffect(() => {
@@ -42,11 +43,23 @@ export function useSession(user) {
     return () => unsubscribe();
   }, [sessionId]);
 
-  // Find current user's check-in (by anonymous UID)
-  const myCheckIn = useMemo(() => {
+  // Find current user's check-in (by anonymous UID), with optimistic fallback
+  const realCheckIn = useMemo(() => {
     if (!user) return null;
     return checkins.find((c) => c.uid === user.uid) || null;
   }, [checkins, user]);
+
+  // Clear optimistic state once real data arrives from onSnapshot
+  useEffect(() => {
+    if (realCheckIn && optimisticCheckIn) setOptimisticCheckIn(null);
+  }, [realCheckIn, optimisticCheckIn]);
+
+  // Clear optimistic state when session changes (prevents stale carry-over)
+  useEffect(() => {
+    setOptimisticCheckIn(null);
+  }, [sessionId]);
+
+  const myCheckIn = realCheckIn || optimisticCheckIn;
 
   const startSession = useCallback(async (adminName) => {
     return createSessionService(adminName);
@@ -67,7 +80,17 @@ export function useSession(user) {
     async (memberData) => {
       if (!session) throw new Error("No active session");
       if (!user) throw new Error("Not authenticated");
-      return checkInService(session.id, user.uid, memberData);
+      await checkInService(session.id, user.uid, memberData);
+      // Optimistic: show "checked in" immediately without waiting for onSnapshot
+      setOptimisticCheckIn({
+        id: user.uid,
+        uid: user.uid,
+        name: memberData.name,
+        experience: memberData.experience || "General",
+        role: memberData.role || memberData.defaultRole || "Debate",
+        partner: memberData.partner || "",
+        preference: memberData.preference || "No Preference",
+      });
     },
     [session, user]
   );
@@ -92,6 +115,7 @@ export function useSession(user) {
   const removeCheckIn = useCallback(
     async (checkinId) => {
       if (!session) return;
+      setOptimisticCheckIn(null);
       return removeCheckInService(session.id, checkinId);
     },
     [session]

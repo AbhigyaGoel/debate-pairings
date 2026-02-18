@@ -22,16 +22,31 @@ function barColor(rate) {
   return "bg-gray-200";
 }
 
-// Cycle: na → present → absent → na
-function nextState(current) {
-  if (current === "na") return "present";
-  if (current === "present") return "absent";
-  return "na"; // absent → na
+// Compute the display state for a cell (applies N/A → absent inference after firstPresent)
+function getDisplayState(rawState, date, firstPresent) {
+  if (rawState === "na" && firstPresent && date >= firstPresent) return "absent";
+  return rawState;
+}
+
+// Context-aware cycle:
+// After firstPresent (no na): present → absent → excused → present
+// Before firstPresent (full):  na → present → absent → excused → na
+function nextState(displayState, afterFirstPresent) {
+  if (afterFirstPresent) {
+    if (displayState === "present") return "absent";
+    if (displayState === "absent") return "excused";
+    return "present"; // excused → present
+  }
+  if (displayState === "na") return "present";
+  if (displayState === "present") return "absent";
+  if (displayState === "absent") return "excused";
+  return "na"; // excused → na
 }
 
 function StateIcon({ state, size = "w-3 h-3" }) {
   if (state === "present") return <span className={`inline-block ${size} bg-emerald-500 rounded-full`} />;
   if (state === "absent") return <span className={`inline-block ${size} bg-red-400 rounded-full opacity-70`} />;
+  if (state === "excused") return <span className={`inline-block ${size} bg-amber-400 rounded-full opacity-80`} />;
   return <span className="inline-block text-gray-300 text-sm leading-none">&mdash;</span>;
 }
 
@@ -60,7 +75,10 @@ function InactiveBadge() {
 function MobileAttendanceCard({ row, dates, activeSessionDate, onToggleAttendance, isExpanded, onToggleExpand }) {
   const displayRate = row.firstSeen ? row.sinceJoinedRate : row.rate;
   const presentCount = dates.filter((d) => row.attendanceByDate[d] === "present").length;
-  const absentCount = dates.filter((d) => row.attendanceByDate[d] === "absent").length;
+  const missedCount = dates.filter((d) => {
+    const ds = getDisplayState(row.attendanceByDate[d], d, row.firstPresent);
+    return ds === "absent" || ds === "excused";
+  }).length;
 
   return (
     <div className="border border-gray-100 rounded-xl bg-white overflow-hidden">
@@ -91,7 +109,7 @@ function MobileAttendanceCard({ row, dates, activeSessionDate, onToggleAttendanc
               {Math.round(displayRate * 100)}%
             </span>
             <span className="text-xs text-gray-400">
-              {presentCount} present{absentCount > 0 ? `, ${absentCount} missed` : ""}
+              {presentCount} present{missedCount > 0 ? `, ${missedCount} missed` : ""}
             </span>
           </div>
           <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -118,13 +136,15 @@ function MobileAttendanceCard({ row, dates, activeSessionDate, onToggleAttendanc
         <div className="border-t border-gray-100 px-3 pb-3 pt-2">
           <div className="grid grid-cols-4 gap-1.5">
             {dates.map((date) => {
-              const state = row.attendanceByDate[date];
+              const rawState = row.attendanceByDate[date];
+              const afterFirst = !!(row.firstPresent && date >= row.firstPresent);
+              const displayState = getDisplayState(rawState, date, row.firstPresent);
               const isActive = date === activeSessionDate;
               const canEdit = onToggleAttendance && !isActive;
               return (
                 <button
                   key={date}
-                  onClick={canEdit ? () => onToggleAttendance(row.name, date, nextState(state)) : undefined}
+                  onClick={canEdit ? () => onToggleAttendance(row.name, date, nextState(displayState, afterFirst)) : undefined}
                   disabled={!canEdit}
                   className={`flex flex-col items-center gap-1 py-2 rounded-lg text-xs transition-colors duration-100 ${
                     isActive
@@ -137,7 +157,7 @@ function MobileAttendanceCard({ row, dates, activeSessionDate, onToggleAttendanc
                   <span className={`font-medium ${isActive ? "text-indigo-600" : "text-gray-500"}`}>
                     {formatDateShort(date)}
                   </span>
-                  <StateIcon state={state} size="w-2.5 h-2.5" />
+                  <StateIcon state={displayState} size="w-2.5 h-2.5" />
                 </button>
               );
             })}
@@ -224,9 +244,10 @@ export function AttendanceTab({
         row.firstSeen || "",
         row.lastSeen || "",
         ...dates.map((d) => {
-          const s = row.attendanceByDate[d];
-          if (s === "present") return "1";
-          if (s === "absent") return "0";
+          const ds = getDisplayState(row.attendanceByDate[d], d, row.firstPresent);
+          if (ds === "present") return "1";
+          if (ds === "absent") return "0";
+          if (ds === "excused") return "E";
           return "N/A";
         }),
       ];
@@ -295,6 +316,9 @@ export function AttendanceTab({
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-2.5 h-2.5 bg-red-400 rounded-full opacity-70" /> Absent
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2.5 h-2.5 bg-amber-400 rounded-full opacity-80" /> Excused
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block text-gray-300 leading-none">&mdash;</span> N/A
@@ -453,14 +477,16 @@ export function AttendanceTab({
                     {dates.map((date) => {
                       const isActiveDate = date === activeSessionDate;
                       const canEdit = onToggleAttendance && !isActiveDate;
-                      const currentState = row.attendanceByDate[date];
+                      const rawState = row.attendanceByDate[date];
+                      const afterFirst = !!(row.firstPresent && date >= row.firstPresent);
+                      const displayState = getDisplayState(rawState, date, row.firstPresent);
                       return (
                         <AttendanceCell
                           key={date}
-                          state={currentState}
+                          state={displayState}
                           isActive={isActiveDate}
                           isEditable={canEdit}
-                          onClick={() => onToggleAttendance(row.name, date, nextState(currentState))}
+                          onClick={() => onToggleAttendance(row.name, date, nextState(displayState, afterFirst))}
                         />
                       );
                     })}

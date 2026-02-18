@@ -84,20 +84,26 @@ function ConfirmStep({ name, isWalkIn, defaults, onCheckIn, onBack }) {
   const [partnerMode, setPartnerMode] = useState(defaults.partner ? "partner" : "solo");
   const [partnerName, setPartnerName] = useState(defaults.partner || "");
   const [preference, setPreference] = useState(defaults.preference || "No Preference");
+  const [submitting, setSubmitting] = useState(false);
 
-  const canCheckIn = role !== "Debate" || partnerMode === "solo" || partnerName.trim().length > 0;
+  const canCheckIn = !submitting && (role !== "Debate" || partnerMode === "solo" || partnerName.trim().length > 0);
 
-  const handleCheckIn = () => {
+  const handleCheckIn = async () => {
     if (!canCheckIn) return;
-    onCheckIn({
-      ...(defaults.memberObj || {}),
-      name,
-      experience,
-      defaultRole: role,
-      role,
-      partner: partnerMode === "solo" ? "" : partnerName.trim(),
-      preference,
-    });
+    setSubmitting(true);
+    try {
+      await onCheckIn({
+        ...(defaults.memberObj || {}),
+        name,
+        experience,
+        defaultRole: role,
+        role,
+        partner: partnerMode === "solo" ? "" : partnerName.trim(),
+        preference,
+      });
+    } catch {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -193,7 +199,7 @@ function ConfirmStep({ name, isWalkIn, defaults, onCheckIn, onBack }) {
         disabled={!canCheckIn}
         className="w-full py-4 bg-indigo-500 text-white text-lg font-bold rounded-xl active:bg-indigo-600 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150"
       >
-        Check In
+        {submitting ? "Checking in..." : "Check In"}
       </button>
     </div>
   );

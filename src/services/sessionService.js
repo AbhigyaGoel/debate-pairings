@@ -63,6 +63,24 @@ export async function updateSessionStatus(sessionId, status) {
   return updateDoc(ref, { status });
 }
 
+// Subscribe to all closed sessions (for real-time attendance sync)
+export function subscribeToClosedSessions(callback, onError) {
+  const q = query(sessionsRef(), where("status", "==", "closed"));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const sessions = snapshot.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+      callback(sessions);
+    },
+    (err) => {
+      console.error("Closed sessions subscription error:", err);
+      if (onError) onError(err);
+    }
+  );
+}
+
 // Subscribe to the most recent open or paired session
 export function subscribeToActiveSession(callback, onError) {
   const q = query(
@@ -109,7 +127,7 @@ export function subscribeToCheckins(sessionId, callback, onError) {
 }
 
 function buildCheckinData(memberData) {
-  return {
+  const data = {
     memberId: memberData.id || "",
     name: memberData.name,
     experience: memberData.experience || "General",
@@ -119,6 +137,8 @@ function buildCheckinData(memberData) {
     halfRound: memberData.halfRound || "",
     checkedInAt: new Date().toISOString(),
   };
+  if (memberData.status) data.status = memberData.status;
+  return data;
 }
 
 // Save generated pairings so all clients can see them
@@ -149,9 +169,10 @@ export async function saveOrgPositionHistory(positionHistory) {
   return setDoc(ref, { positionHistory }, { merge: true });
 }
 
-// Debater self-check-in (uses their anonymous UID)
+// Debater self-check-in (uses their anonymous UID as doc ID for idempotency)
 export async function checkIn(sessionId, uid, memberData) {
-  return addDoc(checkinsRef(sessionId), {
+  const ref = doc(db, "organizations", ORG_ID, "sessions", sessionId, "checkins", uid);
+  return setDoc(ref, {
     uid,
     ...buildCheckinData(memberData),
   });
