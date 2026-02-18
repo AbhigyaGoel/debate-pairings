@@ -174,7 +174,7 @@ export const DisplayTab = ({
           ) : (
             <div className="text-center">
               <h1 className="text-xl font-semibold text-gray-900">
-                Trojan Debate Society - {sessionDate}
+                Chambers - {sessionDate}
               </h1>
             </div>
           )}

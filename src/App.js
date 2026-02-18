@@ -599,10 +599,14 @@ function AppContent() {
           {/* Header */}
           <div className="glass-strong rounded-2xl p-4 sm:p-6 mb-4 sm:mb-6">
             <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <img src="/TDS_Logo_Black.svg" alt="Chambers" className="w-10 h-10 sm:w-12 sm:h-12" />
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">Chambers</h1>
+                  <p className="text-xs text-gray-400">by Abhigya Goel</p>
+                </div>
+              </div>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 mb-1">
-                  Trojan Debate Society
-                </h1>
                 {session && (
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <span className="text-sm text-gray-400">
@@ -685,10 +689,14 @@ function AppContent() {
         {/* Header card */}
         <div className="glass-strong rounded-2xl p-4 sm:p-6 mb-4 sm:mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+            <div className="flex items-center gap-3">
+              <img src="/TDS_Logo_Black.svg" alt="Chambers" className="w-10 h-10 sm:w-12 sm:h-12" />
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">Chambers</h1>
+                <p className="text-xs text-gray-400">by Abhigya Goel</p>
+              </div>
+            </div>
             <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 mb-2">
-                Trojan Debate Society
-              </h1>
               <div className="flex items-center gap-3 text-sm">
                 <span className="flex items-center gap-1.5 text-gray-400">
                   <Calendar className="w-4 h-4" />
