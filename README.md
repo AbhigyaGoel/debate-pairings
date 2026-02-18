@@ -1,6 +1,6 @@
-# Trojan Debate Society — Pairings System
+# Trojan Debate Society - Pairings System
 
-Real-time debate chamber pairing tool built for the Trojan Debate Society at USC. An admin starts a session, debaters check in on their phones, and the system generates balanced parliamentary debate chambers with fair position rotation — all synced live.
+Real-time debate chamber pairing tool built for the Trojan Debate Society at USC. An admin starts a session, debaters check in on their phones, and the system generates balanced parliamentary debate chambers with fair position rotation - all synced live.
 
 Deployed on **Vercel** with a **Firebase** backend.
 
