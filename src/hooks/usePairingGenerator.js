@@ -88,21 +88,6 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
       if (partnerName) {
         let partner = findPartnerMatch(partnerName, activeDebaters, processed, person.name);
 
-        if (partner && partner.experience !== person.experience) {
-          setAlerts((prev) => [
-            ...prev,
-            {
-              type: "warning",
-              message: `${person.name} and ${partner.name} have different experience levels - cannot form team`,
-            },
-          ]);
-          singles[person.experience].push(person);
-          singles[partner.experience].push(partner);
-          processed.add(person.name);
-          processed.add(partner.name);
-          return;
-        }
-
         if (!partner) {
           partner = {
             name: partnerName,
@@ -113,10 +98,14 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
           };
         }
 
+        const teamExperience =
+          person.experience === "Competitive" || partner.experience === "Competitive"
+            ? "Competitive"
+            : "General";
         teams.push({
           id: `team-${teams.length}`,
           members: [person, partner],
-          experience: person.experience,
+          experience: teamExperience,
           preference: person.preference || "No Preference",
           halfRound: person.halfRound || partner.halfRound || "",
         });
@@ -128,6 +117,7 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
       }
     });
 
+    const leftoverSingles = [];
     Object.keys(singles).forEach((level) => {
       const levelSingles = singles[level];
       for (let i = 0; i < levelSingles.length - 1; i += 2) {
@@ -142,15 +132,38 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
       }
 
       if (levelSingles.length % 2 === 1) {
-        teams.push({
-          id: `team-${teams.length}`,
-          members: [levelSingles[levelSingles.length - 1]],
-          experience: level,
-          preference: "No Preference",
-          halfRound: levelSingles[levelSingles.length - 1].halfRound || "",
-        });
+        leftoverSingles.push(levelSingles[levelSingles.length - 1]);
       }
     });
+
+    // Cross-match leftover singles across experience levels
+    for (let i = 0; i < leftoverSingles.length - 1; i += 2) {
+      const a = leftoverSingles[i];
+      const b = leftoverSingles[i + 1];
+      const teamExperience =
+        a.experience === "Competitive" || b.experience === "Competitive"
+          ? "Competitive"
+          : "General";
+      teams.push({
+        id: `team-${teams.length}`,
+        members: [a, b],
+        experience: teamExperience,
+        preference: "No Preference",
+        halfRound: a.halfRound || b.halfRound || "",
+      });
+    }
+
+    // If still one leftover, they become a solo team
+    if (leftoverSingles.length % 2 === 1) {
+      const last = leftoverSingles[leftoverSingles.length - 1];
+      teams.push({
+        id: `team-${teams.length}`,
+        members: [last],
+        experience: last.experience,
+        preference: "No Preference",
+        halfRound: last.halfRound || "",
+      });
+    }
 
     setSpectators(explicitSpectators);
     return { teams, judges: judgeList };
