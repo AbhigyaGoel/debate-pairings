@@ -167,7 +167,7 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
 
     setSpectators(explicitSpectators);
     return { teams, judges: judgeList };
-  }, [participants, setSpectators, setAlerts]);
+  }, [participants, setSpectators]);
 
   const createChambers = useCallback(
     (teams) => {
