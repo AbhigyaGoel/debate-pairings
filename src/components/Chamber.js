@@ -10,6 +10,7 @@ export const Chamber = ({
   onUpdateRoomName,
   onRoundTypeChange,
   onDeleteTeam,
+  onDeletePerson,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -64,6 +65,7 @@ export const Chamber = ({
                 onDragLeave={onDragLeave}
                 onDrop={onDrop}
                 onDeleteTeam={onDeleteTeam}
+                onDeletePerson={onDeletePerson}
               />
             ))}
         </div>
@@ -85,6 +87,7 @@ export const Chamber = ({
                 onDragLeave={onDragLeave}
                 onDrop={onDrop}
                 onDeleteTeam={onDeleteTeam}
+                onDeletePerson={onDeletePerson}
               />
             ))}
         </div>

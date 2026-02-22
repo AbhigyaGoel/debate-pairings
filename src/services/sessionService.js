@@ -13,7 +13,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { normalizeRole } from "../utils/helpers";
+import { normalizeRole, normalizeName, getLocalDateStr } from "../utils/helpers";
 
 const ORG_ID = "trojan-debate";
 
@@ -38,7 +38,7 @@ function generateJoinCode() {
 
 export async function createSession(adminName) {
   const now = new Date();
-  const dateStr = now.toISOString().split("T")[0];
+  const dateStr = getLocalDateStr(now);
   const formatted = now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const docRef = await addDoc(sessionsRef(), {
     date: dateStr,
@@ -256,6 +256,31 @@ export async function subtractSessionPositionsFromOrg(sessionPositions) {
 
   await setDoc(ref, { positionHistory: history }, { merge: true });
   return history;
+}
+
+// --- Attendance Management ---
+
+export async function deleteAttendanceForMember(memberName) {
+  const q = query(sessionsRef(), where("status", "==", "closed"));
+  const sessionSnap = await getDocs(q);
+  const norm = normalizeName(memberName);
+  const deleteOps = [];
+
+  for (const sessionDoc of sessionSnap.docs) {
+    const checkinSnap = await getDocs(checkinsRef(sessionDoc.id));
+    for (const checkinDoc of checkinSnap.docs) {
+      if (normalizeName(checkinDoc.data().name) === norm) {
+        deleteOps.push(deleteDoc(checkinDoc.ref));
+      }
+    }
+  }
+
+  await Promise.all(deleteOps);
+}
+
+export async function updateSessionDate(sessionId, newDate) {
+  const ref = doc(db, "organizations", ORG_ID, "sessions", sessionId);
+  return updateDoc(ref, { date: newDate });
 }
 
 // --- Motion Drop ---

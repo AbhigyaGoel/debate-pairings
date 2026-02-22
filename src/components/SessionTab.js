@@ -6,6 +6,7 @@ import {
   Check,
   X,
   Search,
+  UserPlus,
 } from "lucide-react";
 import { normalizeName, normalizeRole } from "../utils/helpers";
 import { EXPERIENCE_LEVELS, ROLE_OPTIONS } from "../utils/constants";
@@ -341,6 +342,7 @@ export function SessionTab({
   paired,
   chambers,
   spectators,
+  onAutoPlace,
 }) {
   const debaterCount = checkins.filter(
     (c) => normalizeRole(c.role) === "Debate"
@@ -443,7 +445,72 @@ export function SessionTab({
                   Unpaired ({unpairedCheckins.length})
                 </h4>
                 <p className="text-xs text-gray-400 mb-2">Checked in after pairings were generated</p>
-                <CheckInList checkins={unpairedCheckins} onUpdate={onUpdateCheckIn} onRemove={onRemoveCheckIn} />
+
+                {/* Mobile cards with auto-place */}
+                <div className="sm:hidden space-y-2">
+                  {unpairedCheckins.map((checkin) => (
+                    <div key={checkin.id} className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <CheckInCard checkin={checkin} onUpdate={onUpdateCheckIn} onRemove={onRemoveCheckIn} />
+                      </div>
+                      {onAutoPlace && (
+                        <button
+                          onClick={() => onAutoPlace(checkin)}
+                          className="flex-shrink-0 px-2.5 py-1.5 bg-emerald-500 text-white text-xs rounded-lg font-medium hover:bg-emerald-600 transition-colors duration-150"
+                          title="Add to pairings"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop table with auto-place */}
+                <div className="hidden sm:block">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Name</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Experience</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Role</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Partner</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider w-28">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unpairedCheckins.map((checkin) => (
+                        <tr key={checkin.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors duration-150">
+                          <td className="px-4 py-3 text-sm text-gray-600">{checkin.name}</td>
+                          <td className="px-4 py-3">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              checkin.experience === "Competitive" ? "bg-sky-50 text-sky-700 border border-sky-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            }`}>{checkin.experience}</span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{checkin.role}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {checkin.partner || <span className="italic text-gray-300">Solo</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-1">
+                              {onAutoPlace && (
+                                <button
+                                  onClick={() => onAutoPlace(checkin)}
+                                  className="px-2 py-1 bg-emerald-500 text-white text-xs rounded-lg font-medium hover:bg-emerald-600 transition-colors duration-150 flex items-center gap-1"
+                                >
+                                  <UserPlus className="w-3 h-3" /> Place
+                                </button>
+                              )}
+                              <button onClick={() => onRemoveCheckIn(checkin.id)} className="text-gray-300 hover:text-red-500 p-1 transition-colors duration-150">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </>
           ) : (

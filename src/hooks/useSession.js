@@ -75,6 +75,11 @@ export function useSession(user) {
     return updateSessionStatus(session.id, "paired");
   }, [session]);
 
+  const markDraft = useCallback(async () => {
+    if (!session) return;
+    return updateSessionStatus(session.id, "open");
+  }, [session]);
+
   // Debater self-check-in (requires user UID)
   const checkIn = useCallback(
     async (memberData) => {
@@ -145,6 +150,7 @@ export function useSession(user) {
     startSession,
     endSession,
     markPaired,
+    markDraft,
     checkIn,
     adminCheckIn,
     updateCheckIn,

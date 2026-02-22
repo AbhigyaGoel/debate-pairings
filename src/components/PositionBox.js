@@ -15,6 +15,7 @@ export const PositionBox = ({
   onDragLeave,
   onDrop,
   onDeleteTeam,
+  onDeletePerson,
 }) => {
   const { dragOverTarget } = useDragDrop();
   const team = chamber.teams.find((t) => t.position === pos);
@@ -84,6 +85,14 @@ export const PositionBox = ({
                   e.stopPropagation();
                   onDragEnter(e, { type: "position", chamberIdx, position: pos, memberIdx });
                 }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDrop={(e) => {
+                  e.stopPropagation();
+                  onDrop(e, { type: "position", chamberIdx, position: pos, memberIdx });
+                }}
               >
                 <DraggablePerson
                   person={member}
@@ -96,6 +105,18 @@ export const PositionBox = ({
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm text-gray-700 truncate">{member.name}</div>
                 </div>
+                {onDeletePerson && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeletePerson(chamberIdx, pos, member.name);
+                    }}
+                    className="flex-shrink-0 text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
+                    title={`Remove ${member.name}`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             );
           })}

@@ -21,9 +21,9 @@ import { useDragDropHandlers } from "./hooks/useDragDropHandlers";
 import { useSessionHistory } from "./hooks/useSessionHistory";
 import { useAttendance } from "./hooks/useAttendance";
 import { useDragDrop } from "./contexts/DragDropContext";
-import { shuffleArray, normalizeName, normalizeRole, removePersonFromPairings } from "./utils/helpers";
+import { shuffleArray, normalizeName, normalizeRole, removePersonFromPairings, getLocalDateStr } from "./utils/helpers";
 import { ROUND_TYPES, POSITION_NAMES } from "./utils/constants";
-import { loadOrgPositionHistory, saveOrgPositionHistory, updateSessionName, saveMotionDrop, clearMotionDrop } from "./services/sessionService";
+import { loadOrgPositionHistory, saveOrgPositionHistory, updateSessionName, saveMotionDrop, clearMotionDrop, deleteAttendanceForMember } from "./services/sessionService";
 
 function AppContent() {
   const { user, isAdmin, adminName, loading: authLoading, loginAsAdmin, logout } =
@@ -35,7 +35,7 @@ function AppContent() {
 
   const {
     session, sessionLoading, checkins, myCheckIn,
-    startSession, endSession, markPaired,
+    startSession, endSession, markPaired, markDraft,
     checkIn, adminCheckIn, updateCheckIn, removeCheckIn,
     savePairings, saveSessionPositions,
   } = useSession(user);
@@ -46,9 +46,7 @@ function AppContent() {
   const [spectators, setSpectators] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [activeTab, setActiveTab] = useState(isAdmin ? "session" : "display");
-  const [sessionDate, setSessionDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
+  const [sessionDate, setSessionDate] = useState(() => getLocalDateStr());
   const [loading, setLoading] = useState(false);
 
   const {
@@ -61,7 +59,7 @@ function AppContent() {
     dates: attendanceDates, memberRows: attendanceMemberRows,
     summary: attendanceSummary, loading: attendanceLoading,
     progress: attendanceProgress, loadAttendance, invalidateCache: invalidateAttendanceCache,
-    toggleAttendance,
+    toggleAttendance, deleteAttendanceMember, editSessionDate,
   } = useAttendance(members, checkins, session?.date);
 
   // Wrap checkIn to auto-add walk-ins to roster
@@ -141,7 +139,7 @@ function AppContent() {
   // Debounced auto-save chambers/spectators to Firestore (500ms)
   useEffect(() => {
     if (isSyncing.current) return;
-    if (chambers.length > 0 && session?.status === "paired") {
+    if (chambers.length > 0 && session?.id) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         savePairings(chambers, spectators).catch((err) =>
@@ -275,6 +273,18 @@ function AppContent() {
     [updateMember, session, members, checkins, updateCheckIn]
   );
 
+  const handleRemoveMember = useCallback(async (memberId) => {
+    const member = members.find((m) => m.id === memberId);
+    if (!member) return;
+    await removeMember(memberId);
+    try {
+      await deleteAttendanceForMember(member.name);
+      invalidateAttendanceCache();
+    } catch (err) {
+      console.error("Failed to clean attendance for removed member:", err);
+    }
+  }, [removeMember, members, invalidateAttendanceCache]);
+
   const handleAdminAdd = useCallback(
     async (memberData) => {
       try {
@@ -346,6 +356,38 @@ function AppContent() {
     },
     [chambers]
   );
+
+  const handleDeletePerson = useCallback((chamberIdx, position, personName) => {
+    const newChambers = [...chambers];
+    const chamber = newChambers[chamberIdx];
+
+    // Remove from team at position
+    const team = chamber.teams.find((t) => t.position === position);
+    if (team) {
+      team.members = team.members.filter((m) => m.name !== personName);
+      if (team.members.length === 0) {
+        chamber.teams = chamber.teams.filter((t) => t.id !== team.id);
+      }
+    }
+
+    // Also check iron person
+    if (chamber.ironPerson && chamber.ironPerson.name === personName) {
+      chamber.ironPerson = null;
+      chamber.hasIron = false;
+      chamber.ironPosition = null;
+    }
+
+    // Check judges
+    chamber.judges = (chamber.judges || []).filter((j) => j.name !== personName);
+
+    setChambers(newChambers);
+
+    // Remove check-in from session
+    const checkin = checkins.find((c) => normalizeName(c.name) === normalizeName(personName));
+    if (checkin) {
+      removeCheckIn(checkin.id);
+    }
+  }, [chambers, checkins, removeCheckIn]);
 
   const generatePairings = useCallback((sourceParticipants) => {
     setAlerts([]);
@@ -419,8 +461,9 @@ function AppContent() {
       setSessionPositions(currentPositions);
       setChambers(chamberList);
       setActiveTab("chambers");
-      if (session) {
-        markPaired();
+      // If pairings were already released, revert to draft so viewers don't see unfinished re-generation
+      if (session?.status === "paired") {
+        markDraft().catch((err) => console.error("Failed to revert to draft:", err));
       }
       setAlerts((prev) => [
         ...prev,
@@ -439,8 +482,8 @@ function AppContent() {
     createTeams,
     generateChambers,
     assignPositionsInChamber,
-    session,
-    markPaired,
+    session?.status,
+    markDraft,
   ]);
 
   const generateFromRoster = useCallback(() => {
@@ -512,6 +555,72 @@ function AppContent() {
     },
     [chambers]
   );
+
+  const handleAutoPlacePerson = useCallback((checkin) => {
+    if (chambers.length === 0) return;
+    const person = {
+      name: checkin.name,
+      experience: checkin.experience || "General",
+      role: normalizeRole(checkin.role),
+    };
+    const role = person.role;
+    const newChambers = [...chambers];
+
+    if (role === "Judge") {
+      const targetChamber = newChambers.reduce((min, c) =>
+        (c.judges?.length || 0) < (min.judges?.length || 0) ? c : min
+      , newChambers[0]);
+      targetChamber.judges = [...(targetChamber.judges || []), person];
+    } else if (role === "Spectate") {
+      setSpectators((prev) => [...prev, person]);
+      setAlerts((prev) => [...prev, { type: "success", message: `${person.name} added as spectator` }]);
+      return;
+    } else {
+      let placed = false;
+      for (let ci = 0; ci < newChambers.length && !placed; ci++) {
+        for (const team of newChambers[ci].teams) {
+          if (team.members.length === 1) {
+            team.members.push(person);
+            placed = true;
+            if (team.position) {
+              setSessionPositions((prev) => {
+                const updated = { ...prev };
+                if (!updated[person.name]) updated[person.name] = [];
+                updated[person.name] = [...updated[person.name], team.position];
+                return updated;
+              });
+            }
+            break;
+          }
+        }
+      }
+      if (!placed) {
+        const targetChamber = newChambers.reduce((min, c) =>
+          c.teams.length < min.teams.length ? c : min
+        , newChambers[0]);
+        targetChamber.teams.push({
+          id: `team-auto-${Date.now()}`,
+          members: [person],
+          experience: person.experience,
+          position: null,
+        });
+      }
+    }
+
+    setChambers(newChambers);
+    setAlerts((prev) => [...prev, { type: "success", message: `${person.name} added to pairings` }]);
+  }, [chambers]);
+
+  const isDraftPairings = session?.status === "open" && chambers.length > 0;
+
+  const handleFinalizePairings = useCallback(async () => {
+    try {
+      await markPaired();
+      setAlerts([{ type: "success", message: "Pairings released — viewers can now see chambers" }]);
+    } catch (err) {
+      setAlerts([{ type: "error", message: "Failed to release pairings: " + err.message }]);
+    }
+  }, [markPaired]);
 
   const exportToCSV = useCallback(() => {
     const exportDate = session?.date || sessionDate;
@@ -865,9 +974,10 @@ function AppContent() {
                 onAdminAdd={handleAdminAdd}
                 onGeneratePairings={generateFromSession}
                 pairingLoading={loading}
-                paired={session?.status === "paired"}
+                paired={session?.status === "paired" || isDraftPairings}
                 chambers={chambers}
                 spectators={spectators}
+                onAutoPlace={handleAutoPlacePerson}
               />
             )}
 
@@ -877,7 +987,7 @@ function AppContent() {
                 membersLoading={membersLoading}
                 onAddMember={addMember}
                 onUpdateMember={handleUpdateMember}
-                onRemoveMember={removeMember}
+                onRemoveMember={handleRemoveMember}
                 onClearRoster={clearRoster}
                 onImportCSV={importFromCSV}
                 sessionActive={sessionActive}
@@ -897,6 +1007,9 @@ function AppContent() {
                 onRoundTypeChange={handleRoundTypeChange}
                 onExportCSV={exportToCSV}
                 onDeleteTeam={handleDeleteTeam}
+                onDeletePerson={handleDeletePerson}
+                isDraft={isDraftPairings}
+                onFinalize={handleFinalizePairings}
                 {...dragDropHandlers}
               />
             )}
@@ -924,6 +1037,8 @@ function AppContent() {
                 summary={attendanceSummary}
                 activeSessionDate={session?.date}
                 onToggleAttendance={toggleAttendance}
+                onDeleteMember={deleteAttendanceMember}
+                onEditDate={editSessionDate}
               />
             )}
 

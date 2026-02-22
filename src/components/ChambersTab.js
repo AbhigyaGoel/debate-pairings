@@ -1,5 +1,5 @@
 import React from "react";
-import { Users, Download, GripVertical, Plus } from "lucide-react";
+import { Users, Download, GripVertical, Plus, Check, AlertTriangle } from "lucide-react";
 import { Chamber } from "./Chamber";
 
 export const ChambersTab = ({
@@ -10,6 +10,9 @@ export const ChambersTab = ({
   onRoundTypeChange,
   onExportCSV,
   onDeleteTeam,
+  onDeletePerson,
+  isDraft,
+  onFinalize,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -35,6 +38,24 @@ export const ChambersTab = ({
 
   return (
     <div className="space-y-6">
+      {isDraft && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 text-sm text-amber-700">
+          <div className="flex items-center gap-2 flex-1">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            <span>Pairings are in <strong>draft mode</strong> — viewers cannot see them yet.</span>
+          </div>
+          {onFinalize && (
+            <button
+              onClick={onFinalize}
+              className="px-4 py-2 bg-emerald-500 text-white text-sm rounded-lg font-medium flex items-center gap-2 hover:bg-emerald-600 transition-all duration-150 self-start sm:self-auto"
+            >
+              <Check className="w-4 h-4" />
+              Finalize & Release Pairings
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="glass rounded-2xl p-4 sm:p-5">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
           <div className="flex flex-wrap gap-4 sm:gap-8">
@@ -88,6 +109,7 @@ export const ChambersTab = ({
           onUpdateRoomName={onUpdateRoomName}
           onRoundTypeChange={onRoundTypeChange}
           onDeleteTeam={onDeleteTeam}
+          onDeletePerson={onDeletePerson}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onDragOver={onDragOver}

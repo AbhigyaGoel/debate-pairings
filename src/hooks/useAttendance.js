@@ -5,6 +5,8 @@ import {
   adminAddCheckIn,
   updateCheckIn,
   removeCheckIn,
+  deleteAttendanceForMember,
+  updateSessionDate,
 } from "../services/sessionService";
 import { normalizeName } from "../utils/helpers";
 
@@ -130,6 +132,22 @@ export function useAttendance(members, activeCheckins, activeSessionDate) {
     },
     [members]
   );
+
+  const deleteAttendanceMember = useCallback(async (memberName) => {
+    await deleteAttendanceForMember(memberName);
+  }, []);
+
+  const editSessionDate = useCallback(async (oldDate, newDate) => {
+    const data = sessionDataRef.current;
+    if (!data) return;
+    const updates = [];
+    for (const { session } of Object.values(data)) {
+      if (session.date === oldDate) {
+        updates.push(updateSessionDate(session.id, newDate));
+      }
+    }
+    await Promise.all(updates);
+  }, []);
 
   // Build the attendance matrix from raw session data
   const computed = useMemo(() => {
@@ -354,5 +372,7 @@ export function useAttendance(members, activeCheckins, activeSessionDate) {
     loadAttendance,
     invalidateCache,
     toggleAttendance,
+    deleteAttendanceMember,
+    editSessionDate,
   };
 }

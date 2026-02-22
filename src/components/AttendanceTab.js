@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Download, Search, CalendarDays, Users, TrendingUp, ChevronDown } from "lucide-react";
+import { Download, Search, CalendarDays, Users, TrendingUp, ChevronDown, Trash2, Check, X } from "lucide-react";
 
 function formatDateShort(dateStr) {
   if (!dateStr) return "";
@@ -72,7 +72,7 @@ function InactiveBadge() {
   );
 }
 
-function MobileAttendanceCard({ row, dates, activeSessionDate, onToggleAttendance, isExpanded, onToggleExpand }) {
+function MobileAttendanceCard({ row, dates, activeSessionDate, onToggleAttendance, onDeleteMember, isExpanded, onToggleExpand }) {
   const displayRate = row.firstSeen ? row.sinceJoinedRate : row.rate;
   const presentCount = dates.filter((d) => row.attendanceByDate[d] === "present").length;
   const missedCount = dates.filter((d) => {
@@ -99,6 +99,18 @@ function MobileAttendanceCard({ row, dates, activeSessionDate, onToggleAttendanc
             }`}>
               {row.experience}
             </span>
+            {onDeleteMember && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(`Remove all attendance records for ${row.name}?`))
+                    onDeleteMember(row.name);
+                }}
+                className="text-gray-300 active:text-red-500 p-1 transition-colors duration-150"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
             <ChevronDown className={`w-4 h-4 text-gray-300 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
           </div>
         </div>
@@ -176,12 +188,16 @@ export function AttendanceTab({
   summary,
   activeSessionDate,
   onToggleAttendance,
+  onDeleteMember,
+  onEditDate,
 }) {
   const [sortBy, setSortBy] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
   const [filterExperience, setFilterExperience] = useState("all");
   const [search, setSearch] = useState("");
   const [expandedCard, setExpandedCard] = useState(null);
+  const [editingDate, setEditingDate] = useState(null);
+  const [dateDraft, setDateDraft] = useState("");
 
   const filteredAndSorted = useMemo(() => {
     let rows = [...memberRows];
@@ -379,6 +395,7 @@ export function AttendanceTab({
             dates={dates}
             activeSessionDate={activeSessionDate}
             onToggleAttendance={onToggleAttendance}
+            onDeleteMember={onDeleteMember}
             isExpanded={expandedCard === row.name}
             onToggleExpand={() => setExpandedCard(expandedCard === row.name ? null : row.name)}
           />
@@ -425,21 +442,56 @@ export function AttendanceTab({
                 <th className="px-3 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider min-w-[72px]">
                   Last Seen
                 </th>
-                {dates.map((date) => (
-                  <th
-                    key={date}
-                    className={`px-2 py-3 text-center text-xs font-medium tracking-wider whitespace-nowrap min-w-[52px] ${
-                      date === activeSessionDate
-                        ? "text-indigo-600 bg-indigo-50/60"
-                        : "text-gray-400"
-                    }`}
-                  >
-                    {formatDateShort(date)}
-                    {date === activeSessionDate && (
-                      <span className="block w-1.5 h-1.5 bg-indigo-500 rounded-full mx-auto mt-0.5 animate-pulse" />
-                    )}
-                  </th>
-                ))}
+                {onDeleteMember && (
+                  <th className="px-2 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider min-w-[40px]" />
+                )}
+                {dates.map((date) => {
+                  const isActiveDate = date === activeSessionDate;
+                  const isEditing = editingDate === date;
+                  const canEditDate = !isActiveDate && onEditDate;
+                  return (
+                    <th
+                      key={date}
+                      className={`px-2 py-3 text-center text-xs font-medium tracking-wider whitespace-nowrap min-w-[52px] ${
+                        isActiveDate ? "text-indigo-600 bg-indigo-50/60" : "text-gray-400"
+                      } ${canEditDate && !isEditing ? "cursor-pointer hover:text-gray-600" : ""}`}
+                      onClick={canEditDate && !isEditing ? () => { setEditingDate(date); setDateDraft(date); } : undefined}
+                    >
+                      {isEditing ? (
+                        <div className="flex flex-col items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="date"
+                            value={dateDraft}
+                            onChange={(e) => setDateDraft(e.target.value)}
+                            className="w-28 px-1 py-0.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                            autoFocus
+                          />
+                          <div className="flex gap-1">
+                            <button
+                              onClick={async () => {
+                                if (dateDraft && dateDraft !== date) await onEditDate(date, dateDraft);
+                                setEditingDate(null);
+                              }}
+                              className="text-emerald-500 hover:text-emerald-600"
+                            >
+                              <Check className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => setEditingDate(null)} className="text-gray-300 hover:text-gray-500">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {formatDateShort(date)}
+                          {isActiveDate && (
+                            <span className="block w-1.5 h-1.5 bg-indigo-500 rounded-full mx-auto mt-0.5 animate-pulse" />
+                          )}
+                        </>
+                      )}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -474,6 +526,20 @@ export function AttendanceTab({
                     <td className="px-3 py-2.5 text-center text-xs text-gray-400 whitespace-nowrap">
                       {row.lastSeen ? formatDateShort(row.lastSeen) : "\u2014"}
                     </td>
+                    {onDeleteMember && (
+                      <td className="px-2 py-2.5 text-center">
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Remove all attendance records for ${row.name}?`))
+                              onDeleteMember(row.name);
+                          }}
+                          className="text-gray-300 hover:text-red-500 p-1 transition-colors duration-150"
+                          title="Delete attendance records"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    )}
                     {dates.map((date) => {
                       const isActiveDate = date === activeSessionDate;
                       const canEdit = onToggleAttendance && !isActiveDate;
@@ -495,7 +561,7 @@ export function AttendanceTab({
               })}
               {filteredAndSorted.length === 0 && (
                 <tr>
-                  <td colSpan={6 + dates.length} className="text-center py-8 text-gray-400 text-sm">
+                  <td colSpan={6 + (onDeleteMember ? 1 : 0) + dates.length} className="text-center py-8 text-gray-400 text-sm">
                     No members match your filters
                   </td>
                 </tr>
