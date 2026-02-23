@@ -65,7 +65,7 @@ const createIronChamber = (allPeople, chamberCount, roundType = "full") => {
   };
 };
 
-export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
+export const usePairingGenerator = (participants, setSpectators, setAlerts, rosterMembers) => {
   const createTeams = useCallback((overrideParticipants) => {
     const p = overrideParticipants || participants;
     const teams = [],
@@ -89,8 +89,17 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
         let partner = findPartnerMatch(partnerName, activeDebaters, processed, person.name);
 
         if (!partner) {
+          // Try to resolve partial name against roster before creating phantom
+          let resolvedName = partnerName;
+          if (rosterMembers && rosterMembers.length > 0) {
+            const lower = partnerName.toLowerCase().trim();
+            const rosterMatch =
+              rosterMembers.find((m) => m.name.toLowerCase().startsWith(lower)) ||
+              rosterMembers.find((m) => m.name.toLowerCase().includes(lower));
+            if (rosterMatch) resolvedName = rosterMatch.name;
+          }
           partner = {
-            name: partnerName,
+            name: resolvedName,
             partner: "",
             experience: person.experience,
             preference: "No Preference",
@@ -167,7 +176,7 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts) => {
 
     setSpectators(explicitSpectators);
     return { teams, judges: judgeList };
-  }, [participants, setSpectators]);
+  }, [participants, setSpectators, rosterMembers]);
 
   const createChambers = useCallback(
     (teams) => {

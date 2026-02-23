@@ -100,7 +100,7 @@ function MemberCard({ member, onUpdate, onRemove, selectable, selected, onToggle
         <button onClick={startEditing} className="text-gray-300 active:text-indigo-500 p-1.5 transition-colors duration-150">
           <Edit2 className="w-4 h-4" />
         </button>
-        <button onClick={() => onRemove(member.id)} className="text-gray-300 active:text-red-500 p-1.5 transition-colors duration-150" title={`Remove ${member.name}`}>
+        <button onClick={() => { if (window.confirm(`Remove ${member.name} from roster?`)) onRemove(member.id); }} className="text-gray-300 active:text-red-500 p-1.5 transition-colors duration-150" title={`Remove ${member.name}`}>
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
@@ -189,7 +189,7 @@ function MemberRow({ member, onUpdate, onRemove, selectable, selected, onToggle,
             <Edit2 className="w-4 h-4" />
           </button>
           <button
-            onClick={() => onRemove(member.id)}
+            onClick={() => { if (window.confirm(`Remove ${member.name} from roster?`)) onRemove(member.id); }}
             className="text-gray-300 hover:text-red-500 p-1 transition-colors duration-150"
             title={`Remove ${member.name}`}
           >

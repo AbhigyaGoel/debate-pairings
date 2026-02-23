@@ -134,8 +134,16 @@ export function useAttendance(members, activeCheckins, activeSessionDate) {
   );
 
   const deleteAttendanceMember = useCallback(async (memberName) => {
-    await deleteAttendanceForMember(memberName);
-  }, []);
+    try {
+      await deleteAttendanceForMember(memberName);
+      // Tear down subscriptions and reload so deleted records disappear cleanly
+      invalidateCache();
+      loadAttendance();
+    } catch (err) {
+      console.error("Failed to delete attendance for member:", err);
+      alert("Failed to delete attendance records. Please try again.");
+    }
+  }, [invalidateCache, loadAttendance]);
 
   const editSessionDate = useCallback(async (oldDate, newDate) => {
     const data = sessionDataRef.current;

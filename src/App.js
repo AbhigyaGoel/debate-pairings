@@ -23,7 +23,7 @@ import { useAttendance } from "./hooks/useAttendance";
 import { useDragDrop } from "./contexts/DragDropContext";
 import { shuffleArray, normalizeName, normalizeRole, removePersonFromPairings, getLocalDateStr } from "./utils/helpers";
 import { ROUND_TYPES, POSITION_NAMES } from "./utils/constants";
-import { loadOrgPositionHistory, saveOrgPositionHistory, updateSessionName, saveMotionDrop, clearMotionDrop, deleteAttendanceForMember } from "./services/sessionService";
+import { computePositionHistoryFromSessions, updateSessionName, saveMotionDrop, clearMotionDrop, deleteAttendanceForMember } from "./services/sessionService";
 
 function AppContent() {
   const { user, isAdmin, adminName, loading: authLoading, loginAsAdmin, logout } =
@@ -53,6 +53,7 @@ function AppContent() {
     closedSessions, expandedSessionId, checkinCache,
     loading: sessionsLoading, loadSessions,
     expandSession, renameSession, deleteSessionFull,
+    changeSessionDate, removePersonFromSessionPairings, removeSessionCheckin,
   } = useSessionHistory();
 
   const {
@@ -69,10 +70,19 @@ function AppContent() {
     const norm = normalizeName(memberData.name);
     const onRoster = members.some((m) => normalizeName(m.name) === norm);
     if (!onRoster) {
-      try {
-        await addMember({ name: memberData.name, experience: memberData.experience || "General" });
-      } catch (err) {
-        console.error("Failed to auto-add walk-in to roster:", err);
+      // Also check if walk-in name is a first-name match of an existing roster member
+      // e.g. "Darren" should not create a new entry when "Darren Gao" exists
+      const walkInLower = memberData.name.toLowerCase().trim();
+      const firstNameMatch = members.some((m) => {
+        const firstName = m.name.toLowerCase().trim().split(/\s+/)[0];
+        return firstName === walkInLower;
+      });
+      if (!firstNameMatch) {
+        try {
+          await addMember({ name: memberData.name, experience: memberData.experience || "General" });
+        } catch (err) {
+          console.error("Failed to auto-add walk-in to roster:", err);
+        }
       }
     }
     return result;
@@ -113,7 +123,8 @@ function AppContent() {
   const { createTeams, createChambers: generateChambers } = usePairingGenerator(
     participants,
     setSpectators,
-    setAlerts
+    setAlerts,
+    members
   );
   const { assignPositionsInChamber } =
     usePositionAssignment(positionHistory);
@@ -151,11 +162,11 @@ function AppContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chambers, session?.status]);
 
-  // Load org-level position history on mount
+  // Compute position history from all closed sessions on mount
   useEffect(() => {
-    loadOrgPositionHistory()
+    computePositionHistoryFromSessions()
       .then(setPositionHistory)
-      .catch((err) => console.error("Failed to load org position history:", err));
+      .catch((err) => console.error("Failed to compute position history:", err));
   }, []);
 
   // Sync chambers/spectators/sessionPositions from Firestore
@@ -190,14 +201,12 @@ function AppContent() {
 
   const handleDeleteSession = useCallback(async (sessionId) => {
     try {
-      const updatedHistory = await deleteSessionFull(sessionId);
+      await deleteSessionFull(sessionId);
       invalidateAttendanceCache();
-      if (updatedHistory) {
-        setPositionHistory(updatedHistory);
-        setAlerts([{ type: "success", message: "Session deleted and position history updated" }]);
-      } else {
-        setAlerts([{ type: "success", message: "Session deleted (no position data to remove)" }]);
-      }
+      // Recompute position history from remaining sessions
+      const freshHistory = await computePositionHistoryFromSessions();
+      setPositionHistory(freshHistory);
+      setAlerts([{ type: "success", message: "Session deleted" }]);
     } catch (err) {
       setAlerts([{ type: "error", message: "Failed to delete session: " + err.message }]);
     }
@@ -230,18 +239,10 @@ function AppContent() {
   const handleEndSession = useCallback(async () => {
     if (!window.confirm("End the current session? Debaters will no longer be able to check in.")) return;
     try {
-      // Merge current session positions into org-level history
-      if (Object.keys(sessionPositions).length > 0) {
-        const merged = { ...positionHistory };
-        Object.entries(sessionPositions).forEach(([name, positions]) => {
-          if (!merged[name]) merged[name] = [];
-          else merged[name] = [...merged[name]];
-          merged[name].push(...positions);
-        });
-        setPositionHistory(merged);
-        await saveOrgPositionHistory(merged);
-      }
       await endSession();
+      // Recompute position history from all closed sessions (including the one just closed)
+      const freshHistory = await computePositionHistoryFromSessions();
+      setPositionHistory(freshHistory);
       setChambers([]);
       setSpectators([]);
       setSessionPositions({});
@@ -251,7 +252,7 @@ function AppContent() {
     } catch (err) {
       setAlerts([{ type: "error", message: "Failed to end session: " + err.message }]);
     }
-  }, [endSession, sessionPositions, positionHistory, invalidateAttendanceCache]);
+  }, [endSession, invalidateAttendanceCache]);
 
   const handleUpdateMember = useCallback(
     async (memberId, updates) => {
@@ -1051,6 +1052,9 @@ function AppContent() {
                 onExpand={expandSession}
                 onRename={renameSession}
                 onDelete={handleDeleteSession}
+                onChangeDate={changeSessionDate}
+                onRemovePersonFromPairings={removePersonFromSessionPairings}
+                onRemoveCheckin={removeSessionCheckin}
               />
             )}
           </div>

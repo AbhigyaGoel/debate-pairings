@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Download, Search, CalendarDays, Users, TrendingUp, ChevronDown, Trash2, Check, X } from "lucide-react";
+import { Download, Search, CalendarDays, TrendingUp, ChevronDown, Trash2, Check, X } from "lucide-react";
 
 function formatDateShort(dateStr) {
   if (!dateStr) return "";
@@ -194,16 +194,41 @@ export function AttendanceTab({
   const [sortBy, setSortBy] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
   const [filterExperience, setFilterExperience] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
   const [search, setSearch] = useState("");
   const [expandedCard, setExpandedCard] = useState(null);
   const [editingDate, setEditingDate] = useState(null);
   const [dateDraft, setDateDraft] = useState("");
+
+  const activeCount = useMemo(() => memberRows.filter((r) => !r.inactive).length, [memberRows]);
+  const inactiveCount = useMemo(() => memberRows.filter((r) => r.inactive).length, [memberRows]);
+
+  const activeSummary = useMemo(() => {
+    const active = memberRows.filter((r) => !r.inactive);
+    if (active.length === 0) return { avgRate: 0, avgStreak: 0 };
+    const avgRate = active.reduce((sum, r) => sum + (r.firstSeen ? r.sinceJoinedRate : r.rate), 0) / active.length;
+    const avgStreak = active.reduce((sum, r) => sum + r.streak, 0) / active.length;
+    return { avgRate: Math.round(avgRate * 100), avgStreak: Math.round(avgStreak * 10) / 10 };
+  }, [memberRows]);
+
+  const inactiveSummary = useMemo(() => {
+    const inactive = memberRows.filter((r) => r.inactive);
+    if (inactive.length === 0) return { avgRate: 0 };
+    const avgRate = inactive.reduce((sum, r) => sum + (r.firstSeen ? r.sinceJoinedRate : r.rate), 0) / inactive.length;
+    return { avgRate: Math.round(avgRate * 100) };
+  }, [memberRows]);
 
   const filteredAndSorted = useMemo(() => {
     let rows = [...memberRows];
 
     if (filterExperience !== "all") {
       rows = rows.filter((r) => r.experience === filterExperience);
+    }
+
+    if (filterStatus === "active") {
+      rows = rows.filter((r) => !r.inactive);
+    } else if (filterStatus === "inactive") {
+      rows = rows.filter((r) => r.inactive);
     }
 
     if (search.trim()) {
@@ -233,7 +258,7 @@ export function AttendanceTab({
     });
 
     return rows;
-  }, [memberRows, sortBy, sortDir, filterExperience, search]);
+  }, [memberRows, sortBy, sortDir, filterExperience, filterStatus, search]);
 
   const handleSort = (field) => {
     if (sortBy === field) {
@@ -305,7 +330,7 @@ export function AttendanceTab({
     return sortDir === "asc" ? " \u2191" : " \u2193";
   };
 
-  const isFiltered = filterExperience !== "all" || search.trim();
+  const isFiltered = filterExperience !== "all" || filterStatus !== "all" || search.trim();
 
   return (
     <div className="space-y-4">
@@ -315,10 +340,16 @@ export function AttendanceTab({
           <CalendarDays className="w-4 h-4 text-gray-400" />
           <span className="font-medium">{summary.totalDates}</span> date{summary.totalDates !== 1 ? "s" : ""}
         </span>
-        <span className="flex items-center gap-1.5 text-gray-500">
-          <Users className="w-4 h-4 text-gray-400" />
-          <span className="font-medium">{summary.memberCount}</span> member{summary.memberCount !== 1 ? "s" : ""}
+        <span className="text-gray-200 hidden sm:inline">|</span>
+        <span className="flex items-center gap-1.5 text-emerald-600">
+          <span className="font-medium">{activeCount}</span> active
+          <span className="text-gray-400 text-xs">({activeSummary.avgRate}% avg)</span>
         </span>
+        <span className="flex items-center gap-1.5 text-gray-400">
+          <span className="font-medium">{inactiveCount}</span> inactive
+          {inactiveCount > 0 && <span className="text-xs">({inactiveSummary.avgRate}% avg)</span>}
+        </span>
+        <span className="text-gray-200 hidden sm:inline">|</span>
         <span className="flex items-center gap-1.5 text-gray-500">
           <TrendingUp className="w-4 h-4 text-gray-400" />
           Avg <span className="font-medium">{summary.avgAttendance}</span>/session
@@ -362,6 +393,15 @@ export function AttendanceTab({
             <option value="all">All Levels</option>
             <option value="Competitive">Competitive</option>
             <option value="General">General</option>
+          </select>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active Only</option>
+            <option value="inactive">Inactive Only</option>
           </select>
         </div>
         <div className="flex gap-2">

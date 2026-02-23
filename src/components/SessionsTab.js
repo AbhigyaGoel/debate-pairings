@@ -10,12 +10,12 @@ import {
   Clock,
   MessageSquare,
   LayoutGrid,
+  Calendar,
 } from "lucide-react";
 import { ROUND_TYPES, POSITION_NAMES } from "../utils/constants";
 
 function formatDate(dateStr) {
   if (!dateStr) return "";
-  // Handle "YYYY-MM-DD" without timezone shift (new Date("2025-01-27") parses as UTC, showing wrong day in US timezones)
   const parts = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
   const d = parts
     ? new Date(parts[1], parts[2] - 1, parts[3])
@@ -76,7 +76,59 @@ function SessionName({ name, fallbackDate, onRename }) {
   );
 }
 
-function AttendeeList({ checkins }) {
+function SessionDateEditor({ date, onChangeDate }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const startEdit = (e) => {
+    e.stopPropagation();
+    setDraft(date || "");
+    setEditing(true);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="date"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="px-2 py-0.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
+          autoFocus
+        />
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (draft && draft !== date) onChangeDate(draft);
+            setEditing(false);
+          }}
+          className="text-emerald-500 hover:text-emerald-600 p-0.5"
+        >
+          <Check className="w-3 h-3" />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); setEditing(false); }}
+          className="text-gray-300 hover:text-gray-500 p-0.5"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <span
+      className="flex items-center gap-1 text-xs text-gray-400 cursor-pointer hover:text-indigo-500 transition-colors duration-150"
+      onClick={startEdit}
+    >
+      <Calendar className="w-3 h-3" />
+      {date ? formatDate(date) : formatDate("")}
+      <Edit2 className="w-2.5 h-2.5" />
+    </span>
+  );
+}
+
+function AttendeeList({ checkins, sessionId, onRemoveCheckin }) {
   if (!checkins) {
     return (
       <div className="py-3 text-sm text-gray-400 text-center">Loading...</div>
@@ -88,11 +140,13 @@ function AttendeeList({ checkins }) {
     );
   }
 
+  const sorted = [...checkins].sort((a, b) => a.name.localeCompare(b.name));
+
   return (
     <div className="pt-2 pb-1">
       {/* Mobile cards */}
       <div className="sm:hidden space-y-1.5">
-        {checkins.map((c) => (
+        {sorted.map((c) => (
           <div key={c.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-gray-50">
             <span className="text-sm text-gray-700 flex-1 truncate">{c.name}</span>
             <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
@@ -101,6 +155,17 @@ function AttendeeList({ checkins }) {
                 : "bg-emerald-50 text-emerald-700 border border-emerald-200"
             }`}>{c.experience || "General"}</span>
             <span className="text-xs text-gray-400">{c.role || "Debate"}</span>
+            {onRemoveCheckin && (
+              <button
+                onClick={() => {
+                  if (window.confirm(`Remove ${c.name} from this session?`))
+                    onRemoveCheckin(sessionId, c.id);
+                }}
+                className="text-gray-300 active:text-red-500 p-1 transition-colors duration-150 flex-shrink-0"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -113,10 +178,13 @@ function AttendeeList({ checkins }) {
               <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Name</th>
               <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Experience</th>
               <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Role</th>
+              {onRemoveCheckin && (
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider w-12" />
+              )}
             </tr>
           </thead>
           <tbody>
-            {checkins.map((c) => (
+            {sorted.map((c) => (
               <tr key={c.id} className="border-b border-gray-50 last:border-0">
                 <td className="px-3 py-2 text-sm text-gray-600">{c.name}</td>
                 <td className="px-3 py-2">
@@ -127,6 +195,20 @@ function AttendeeList({ checkins }) {
                   }`}>{c.experience || "General"}</span>
                 </td>
                 <td className="px-3 py-2 text-sm text-gray-600">{c.role || "Debate"}</td>
+                {onRemoveCheckin && (
+                  <td className="px-3 py-2">
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Remove ${c.name} from this session?`))
+                          onRemoveCheckin(sessionId, c.id);
+                      }}
+                      className="text-gray-300 hover:text-red-500 p-1 transition-colors duration-150"
+                      title={`Remove ${c.name}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -157,7 +239,7 @@ function SessionMotion({ session }) {
   );
 }
 
-function SessionPairings({ session }) {
+function SessionPairings({ session, onRemovePersonFromPairings }) {
   const chambers = session.chambers;
   if (!chambers || chambers.length === 0) return null;
 
@@ -181,8 +263,25 @@ function SessionPairings({ session }) {
                 return (
                   <div key={pos} className="flex items-start gap-2">
                     <span className="text-xs text-gray-400 font-medium w-6 flex-shrink-0 mt-0.5">{pos}</span>
-                    <div className="text-xs text-gray-600">
-                      {team.members.map((m) => m.name).join(" & ")}
+                    <div className="text-xs text-gray-600 flex items-center gap-1 flex-wrap">
+                      {team.members.map((m, mi) => (
+                        <span key={m.name} className="inline-flex items-center gap-0.5">
+                          {mi > 0 && <span>&amp; </span>}
+                          {m.name}
+                          {onRemovePersonFromPairings && (
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Remove ${m.name} from this session's pairings?`))
+                                  onRemovePersonFromPairings(session.id, m.name);
+                              }}
+                              className="text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
+                              title={`Remove ${m.name}`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </span>
+                      ))}
                       {team.members.length === 1 && (
                         <span className="ml-1 text-amber-600 font-medium">(Iron)</span>
                       )}
@@ -193,58 +292,105 @@ function SessionPairings({ session }) {
               {chamber.hasIron && chamber.ironPerson && (
                 <div className="flex items-start gap-2">
                   <span className="text-xs text-amber-600 font-medium w-6 flex-shrink-0 mt-0.5">Fe</span>
-                  <span className="text-xs text-amber-700">
+                  <span className="text-xs text-amber-700 inline-flex items-center gap-0.5">
                     {chamber.ironPerson.name} ({POSITION_NAMES[chamber.ironPosition]})
+                    {onRemovePersonFromPairings && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Remove ${chamber.ironPerson.name} from this session's pairings?`))
+                            onRemovePersonFromPairings(session.id, chamber.ironPerson.name);
+                        }}
+                        className="text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
+                        title={`Remove ${chamber.ironPerson.name}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
                   </span>
                 </div>
               )}
             </div>
             {chamber.judges?.length > 0 && (
-              <div className="mt-1.5 pt-1.5 border-t border-gray-200 text-xs text-gray-500">
-                Judge: {chamber.judges.map((j) => j.name).join(", ")}
+              <div className="mt-1.5 pt-1.5 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-1 flex-wrap">
+                Judge:
+                {chamber.judges.map((j, ji) => (
+                  <span key={j.name} className="inline-flex items-center gap-0.5">
+                    {ji > 0 && <span>,</span>}
+                    {j.name}
+                    {onRemovePersonFromPairings && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Remove ${j.name} from this session's pairings?`))
+                            onRemovePersonFromPairings(session.id, j.name);
+                        }}
+                        className="text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
+                        title={`Remove ${j.name}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </span>
+                ))}
               </div>
             )}
           </div>
         ))}
       </div>
       {session.spectators?.length > 0 && (
-        <div className="text-xs text-gray-400">
-          Spectators: {session.spectators.map((s) => s.name || s).join(", ")}
+        <div className="text-xs text-gray-400 flex items-center gap-1 flex-wrap">
+          Spectators:
+          {session.spectators.map((s, si) => {
+            const name = s.name || s;
+            return (
+              <span key={name} className="inline-flex items-center gap-0.5">
+                {si > 0 && <span>,</span>}
+                {name}
+                {onRemovePersonFromPairings && (
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Remove ${name} from this session's pairings?`))
+                        onRemovePersonFromPairings(session.id, name);
+                    }}
+                    className="text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
+                    title={`Remove ${name}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </span>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-function SessionDetails({ session, checkins }) {
+function SessionDetails({ session, checkins, onRemovePersonFromPairings, onRemoveCheckin }) {
   const hasMotion = !!session.motion;
   const hasPairings = session.chambers?.length > 0;
 
   return (
     <div className="space-y-4">
       {hasMotion && <SessionMotion session={session} />}
-      {hasPairings && <SessionPairings session={session} />}
+      {hasPairings && <SessionPairings session={session} onRemovePersonFromPairings={onRemovePersonFromPairings} />}
       {(hasMotion || hasPairings) && (
         <div className="flex items-center gap-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider">
           <Users className="w-3.5 h-3.5" />
           Attendance
         </div>
       )}
-      <AttendeeList checkins={checkins} />
+      <AttendeeList checkins={checkins} sessionId={session.id} onRemoveCheckin={onRemoveCheckin} />
     </div>
   );
 }
 
-function SessionCard({ session, expanded, checkins, onExpand, onRename, onDelete }) {
+function SessionCard({ session, expanded, checkins, onExpand, onRename, onDelete, onChangeDate, onRemovePersonFromPairings, onRemoveCheckin }) {
   const attendanceCount = checkins?.length ?? session.attendanceCount ?? "—";
-  const hasPositions = session.sessionPositions && Object.keys(session.sessionPositions).length > 0;
 
   const handleDelete = (e) => {
     e.stopPropagation();
-    const msg = hasPositions
-      ? "Delete this session? Its position assignments will be removed from the accumulated history."
-      : "Delete this session? (No position data to remove from history.)";
-    if (window.confirm(msg)) onDelete(session.id);
+    if (window.confirm("Delete this session? This cannot be undone.")) onDelete(session.id);
   };
 
   return (
@@ -259,10 +405,14 @@ function SessionCard({ session, expanded, checkins, onExpand, onRename, onDelete
         <div className="flex-1 min-w-0">
           <SessionName name={session.name} fallbackDate={session.createdAt} onRename={(n) => onRename(session.id, n)} />
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            <span className="flex items-center gap-1 text-xs text-gray-400">
-              <Clock className="w-3 h-3" />
-              {formatDate(session.createdAt)}
-            </span>
+            {onChangeDate ? (
+              <SessionDateEditor date={session.date} onChangeDate={(d) => onChangeDate(session.id, d)} />
+            ) : (
+              <span className="flex items-center gap-1 text-xs text-gray-400">
+                <Clock className="w-3 h-3" />
+                {formatDate(session.date || session.createdAt)}
+              </span>
+            )}
             {session.createdBy && (
               <span className="text-xs text-gray-400">by {session.createdBy}</span>
             )}
@@ -283,23 +433,24 @@ function SessionCard({ session, expanded, checkins, onExpand, onRename, onDelete
       </div>
       {expanded && (
         <div className="border-t border-gray-100 px-3 py-3">
-          <SessionDetails session={session} checkins={checkins} />
+          <SessionDetails
+            session={session}
+            checkins={checkins}
+            onRemovePersonFromPairings={onRemovePersonFromPairings}
+            onRemoveCheckin={onRemoveCheckin}
+          />
         </div>
       )}
     </div>
   );
 }
 
-function SessionRow({ session, expanded, checkins, onExpand, onRename, onDelete }) {
+function SessionRow({ session, expanded, checkins, onExpand, onRename, onDelete, onChangeDate, onRemovePersonFromPairings, onRemoveCheckin }) {
   const attendanceCount = checkins?.length ?? session.attendanceCount ?? "—";
-  const hasPositions = session.sessionPositions && Object.keys(session.sessionPositions).length > 0;
 
   const handleDelete = (e) => {
     e.stopPropagation();
-    const msg = hasPositions
-      ? "Delete this session? Its position assignments will be removed from the accumulated history."
-      : "Delete this session? (No position data to remove from history.)";
-    if (window.confirm(msg)) onDelete(session.id);
+    if (window.confirm("Delete this session? This cannot be undone.")) onDelete(session.id);
   };
 
   return (
@@ -316,7 +467,13 @@ function SessionRow({ session, expanded, checkins, onExpand, onRename, onDelete 
         <td className="px-4 py-3">
           <SessionName name={session.name} fallbackDate={session.createdAt} onRename={(n) => onRename(session.id, n)} />
         </td>
-        <td className="px-4 py-3 text-sm text-gray-500">{formatDate(session.createdAt)}</td>
+        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+          {onChangeDate ? (
+            <SessionDateEditor date={session.date} onChangeDate={(d) => onChangeDate(session.id, d)} />
+          ) : (
+            <span className="text-sm text-gray-500">{formatDate(session.date || session.createdAt)}</span>
+          )}
+        </td>
         <td className="px-4 py-3 text-sm text-gray-500">{session.createdBy || "—"}</td>
         <td className="px-4 py-3 text-sm text-gray-500">{attendanceCount}</td>
         <td className="px-4 py-3">
@@ -332,7 +489,12 @@ function SessionRow({ session, expanded, checkins, onExpand, onRename, onDelete 
       {expanded && (
         <tr>
           <td colSpan={6} className="px-4 py-3 bg-gray-50/50">
-            <SessionDetails session={session} checkins={checkins} />
+            <SessionDetails
+              session={session}
+              checkins={checkins}
+              onRemovePersonFromPairings={onRemovePersonFromPairings}
+              onRemoveCheckin={onRemoveCheckin}
+            />
           </td>
         </tr>
       )}
@@ -348,6 +510,9 @@ export function SessionsTab({
   onExpand,
   onRename,
   onDelete,
+  onChangeDate,
+  onRemovePersonFromPairings,
+  onRemoveCheckin,
 }) {
   if (loading) {
     return (
@@ -385,6 +550,9 @@ export function SessionsTab({
             onExpand={onExpand}
             onRename={onRename}
             onDelete={onDelete}
+            onChangeDate={onChangeDate}
+            onRemovePersonFromPairings={onRemovePersonFromPairings}
+            onRemoveCheckin={onRemoveCheckin}
           />
         ))}
       </div>
@@ -412,6 +580,9 @@ export function SessionsTab({
                 onExpand={onExpand}
                 onRename={onRename}
                 onDelete={onDelete}
+                onChangeDate={onChangeDate}
+                onRemovePersonFromPairings={onRemovePersonFromPairings}
+                onRemoveCheckin={onRemoveCheckin}
               />
             ))}
           </tbody>

@@ -50,6 +50,87 @@ function JoinCodeGate({ joinCode, onVerified }) {
   );
 }
 
+function PartnerAutocomplete({ value, onChange, members, placeholder = "Enter partner's name" }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
+
+  const suggestions = useMemo(() => {
+    const q = value.trim().toLowerCase();
+    if (q.length < 2 || !members || members.length === 0) return [];
+
+    // 1. Exact substring match
+    const exact = members.filter((m) => m.name.toLowerCase().includes(q));
+    if (exact.length > 0) return exact.slice(0, 6);
+
+    // 2. Word-prefix match
+    const queryWords = q.split(/\s+/).filter(Boolean);
+    if (queryWords.length > 0) {
+      const wordMatches = members.filter((m) => {
+        const nameWords = m.name.toLowerCase().split(/\s+/);
+        return queryWords.every((qw) => nameWords.some((nw) => nw.startsWith(qw)));
+      });
+      if (wordMatches.length > 0) return wordMatches.slice(0, 6);
+    }
+
+    // 3. Fuzzy Levenshtein
+    const qNorm = normalizeName(q);
+    const scored = members
+      .map((m) => ({ member: m, dist: levenshtein(qNorm, normalizeName(m.name)) }))
+      .filter((s) => s.dist <= Math.max(3, Math.floor(s.member.name.length * 0.35)))
+      .sort((a, b) => a.dist - b.dist);
+    return scored.slice(0, 6).map((s) => s.member);
+  }, [value, members]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("touchstart", handler);
+    return () => { document.removeEventListener("mousedown", handler); document.removeEventListener("touchstart", handler); };
+  }, []);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-150"
+        autoComplete="off"
+        autoCorrect="off"
+        autoFocus
+      />
+      {open && suggestions.length > 0 && (
+        <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+          {suggestions.map((member) => (
+            <button
+              key={member.id || member.name}
+              type="button"
+              onClick={() => { onChange(member.name); setOpen(false); }}
+              className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-indigo-50 active:bg-indigo-100 flex items-center gap-2 transition-colors duration-100"
+            >
+              <span className="font-medium">{member.name}</span>
+              {member.experience && (
+                <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                  member.experience === "Competitive"
+                    ? "bg-sky-50 text-sky-600 border border-sky-200"
+                    : "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                }`}>
+                  {member.experience}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PillSelector({ label, options, value, onChange, colorMap }) {
   return (
     <div>
@@ -78,7 +159,7 @@ function PillSelector({ label, options, value, onChange, colorMap }) {
   );
 }
 
-function ConfirmStep({ name, isWalkIn, defaults, onCheckIn, onBack }) {
+function ConfirmStep({ name, isWalkIn, defaults, onCheckIn, onBack, members }) {
   const [role, setRole] = useState(defaults.role || "Debate");
   const [experience, setExperience] = useState(defaults.experience || "General");
   const [partnerMode, setPartnerMode] = useState(defaults.partner ? "partner" : "solo");
@@ -173,13 +254,10 @@ function ConfirmStep({ name, isWalkIn, defaults, onCheckIn, onBack }) {
             </button>
           </div>
           {partnerMode === "partner" && (
-            <input
-              type="text"
+            <PartnerAutocomplete
               value={partnerName}
-              onChange={(e) => setPartnerName(e.target.value)}
-              placeholder="Enter partner's name"
-              className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-150"
-              autoFocus
+              onChange={setPartnerName}
+              members={members}
             />
           )}
         </div>
@@ -208,6 +286,7 @@ function ConfirmStep({ name, isWalkIn, defaults, onCheckIn, onBack }) {
 function SearchStep({ members, onSelectMember, onWalkIn }) {
   const [query, setQuery] = useState("");
   const [didYouMean, setDidYouMean] = useState(null);
+  const [didYouMeanList, setDidYouMeanList] = useState(null);
   const suggestionsRef = useRef(null);
 
   const suggestions = useMemo(() => {
@@ -260,14 +339,24 @@ function SearchStep({ members, onSelectMember, onWalkIn }) {
       if (member) return onSelectMember(member);
     }
 
-    // Check if query matches a member's first name or is a prefix of their full name
-    // Catches "abhigya" → "Abhigya Goel", "abhimanyu" → "Abhimanyu Wadhwa"
+    // Check if query is an exact first name of roster member(s)
     const qLower = trimmed.toLowerCase();
-    const prefixMatch = members.find((m) => {
-      const nameLower = m.name.toLowerCase();
-      const firstName = nameLower.split(/\s+/)[0];
-      return nameLower.startsWith(qLower) || firstName === qLower;
+    const firstNameMatches = members.filter((m) => {
+      const firstName = m.name.toLowerCase().split(/\s+/)[0];
+      return firstName === qLower;
     });
+    if (firstNameMatches.length === 1) {
+      // Exactly one match — auto-select without "Did you mean?"
+      return onSelectMember(firstNameMatches[0]);
+    }
+    if (firstNameMatches.length > 1) {
+      // Multiple matches — show "Did you mean?" with all of them
+      setDidYouMeanList(firstNameMatches.map((m) => m.name));
+      return;
+    }
+
+    // Check if query is a prefix of someone's full name
+    const prefixMatch = members.find((m) => m.name.toLowerCase().startsWith(qLower));
     if (prefixMatch) {
       setDidYouMean(prefixMatch.name);
       return;
@@ -332,6 +421,59 @@ function SearchStep({ members, onSelectMember, onWalkIn }) {
           </button>
           <button
             onClick={() => setDidYouMean(null)}
+            className="w-full py-2 text-xs text-gray-300 active:text-gray-500 transition-colors duration-150"
+          >
+            Go back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // "Did you mean?" for multiple first-name matches
+  if (didYouMeanList) {
+    return (
+      <div className="max-w-md mx-auto px-4 text-center">
+        <div className="mb-4">
+          <Users className="w-10 h-10 text-indigo-500 mx-auto mb-2" />
+          <h2 className="text-lg font-bold text-gray-900">Which one are you?</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Multiple members match <strong>"{query.trim()}"</strong>
+          </p>
+        </div>
+        <div className="space-y-2">
+          {didYouMeanList.map((name) => {
+            const member = members.find((m) => m.name === name);
+            return (
+              <button
+                key={name}
+                onClick={() => { setDidYouMeanList(null); if (member) onSelectMember(member); }}
+                className="w-full px-4 py-4 glass rounded-xl active:bg-gray-100 hover:bg-gray-50 flex items-center justify-between transition-all duration-150"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-gray-700">{name}</span>
+                  {member && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      member.experience === "Competitive"
+                        ? "bg-sky-50 text-sky-700 border border-sky-200"
+                        : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                    }`}>
+                      {member.experience}
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-indigo-500 font-medium">That's me</span>
+              </button>
+            );
+          })}
+          <button
+            onClick={() => { setDidYouMeanList(null); onWalkIn(query.trim()); }}
+            className="w-full py-3 text-sm text-gray-400 active:text-gray-600 transition-colors duration-150"
+          >
+            None of these — join as <strong>"{query.trim()}"</strong>
+          </button>
+          <button
+            onClick={() => setDidYouMeanList(null)}
             className="w-full py-2 text-xs text-gray-300 active:text-gray-500 transition-colors duration-150"
           >
             Go back
@@ -412,7 +554,7 @@ function SearchStep({ members, onSelectMember, onWalkIn }) {
   );
 }
 
-function CheckedInCard({ checkIn, onUpdate, onLeave, paired }) {
+function CheckedInCard({ checkIn, onUpdate, onLeave, paired, members }) {
   const [editing, setEditing] = useState(false);
   const [partnerMode, setPartnerMode] = useState(checkIn.partner ? "partner" : "solo");
   const [partnerName, setPartnerName] = useState(checkIn.partner || "");
@@ -502,13 +644,10 @@ function CheckedInCard({ checkIn, onUpdate, onLeave, paired }) {
                     </button>
                   </div>
                   {partnerMode === "partner" && (
-                    <input
-                      type="text"
+                    <PartnerAutocomplete
                       value={partnerName}
-                      onChange={(e) => setPartnerName(e.target.value)}
-                      placeholder="Enter partner's name"
-                      className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-150"
-                      autoFocus
+                      onChange={setPartnerName}
+                      members={members}
                     />
                   )}
                 </div>
@@ -569,7 +708,7 @@ export function CheckInView({ members, myCheckIn, session, onCheckIn, onUpdateCh
   const [confirmData, setConfirmData] = useState(null);
 
   if (myCheckIn) {
-    return <CheckedInCard checkIn={myCheckIn} onUpdate={onUpdateCheckIn} onLeave={onLeave} paired={session?.status === "paired"} />;
+    return <CheckedInCard checkIn={myCheckIn} onUpdate={onUpdateCheckIn} onLeave={onLeave} paired={session?.status === "paired"} members={members} />;
   }
 
   if (session?.joinCode && !codeVerified) {
@@ -584,6 +723,7 @@ export function CheckInView({ members, myCheckIn, session, onCheckIn, onUpdateCh
         defaults={confirmData.defaults}
         onCheckIn={onCheckIn}
         onBack={() => { setStep("search"); setConfirmData(null); }}
+        members={members}
       />
     );
   }

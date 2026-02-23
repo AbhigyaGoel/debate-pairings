@@ -4,7 +4,6 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
-  getDoc,
   getDocs,
   setDoc,
   query,
@@ -156,17 +155,20 @@ export async function saveSessionPositions(sessionId, sessionPositions) {
   return updateDoc(ref, clean);
 }
 
-// Load org-level position history (accumulated from all previous sessions)
-export async function loadOrgPositionHistory() {
-  const ref = doc(db, "organizations", ORG_ID);
-  const snap = await getDoc(ref);
-  return snap.exists() ? (snap.data().positionHistory || {}) : {};
-}
-
-// Save org-level position history
-export async function saveOrgPositionHistory(positionHistory) {
-  const ref = doc(db, "organizations", ORG_ID);
-  return setDoc(ref, { positionHistory }, { merge: true });
+// Compute position history from all closed sessions' sessionPositions
+export async function computePositionHistoryFromSessions() {
+  const q = query(sessionsRef(), where("status", "==", "closed"));
+  const snapshot = await getDocs(q);
+  const history = {};
+  for (const d of snapshot.docs) {
+    const sp = d.data().sessionPositions;
+    if (!sp) continue;
+    Object.entries(sp).forEach(([name, positions]) => {
+      if (!history[name]) history[name] = [];
+      history[name].push(...positions);
+    });
+  }
+  return history;
 }
 
 // Debater self-check-in (uses their anonymous UID as doc ID for idempotency)
@@ -234,29 +236,6 @@ export async function deleteSession(sessionId) {
   return deleteDoc(ref);
 }
 
-export async function subtractSessionPositionsFromOrg(sessionPositions) {
-  const ref = doc(db, "organizations", ORG_ID);
-  const snap = await getDoc(ref);
-  const history = snap.exists() ? { ...(snap.data().positionHistory || {}) } : {};
-
-  Object.entries(sessionPositions).forEach(([name, positions]) => {
-    if (!history[name]) return;
-    const arr = [...history[name]];
-    // Remove each position from the end (chronological order)
-    [...positions].reverse().forEach((pos) => {
-      const idx = arr.lastIndexOf(pos);
-      if (idx !== -1) arr.splice(idx, 1);
-    });
-    if (arr.length === 0) {
-      delete history[name];
-    } else {
-      history[name] = arr;
-    }
-  });
-
-  await setDoc(ref, { positionHistory: history }, { merge: true });
-  return history;
-}
 
 // --- Attendance Management ---
 
@@ -276,6 +255,12 @@ export async function deleteAttendanceForMember(memberName) {
   }
 
   await Promise.all(deleteOps);
+}
+
+export async function updateSessionPairings(sessionId, chambers, spectators) {
+  const ref = doc(db, "organizations", ORG_ID, "sessions", sessionId);
+  const clean = JSON.parse(JSON.stringify({ chambers, spectators }));
+  return updateDoc(ref, clean);
 }
 
 export async function updateSessionDate(sessionId, newDate) {

@@ -4,8 +4,11 @@ import {
   loadSessionCheckins,
   updateSessionName,
   deleteSession,
-  subtractSessionPositionsFromOrg,
+  updateSessionDate,
+  updateSessionPairings,
+  removeCheckIn,
 } from "../services/sessionService";
+import { removePersonFromPairings } from "../utils/helpers";
 
 export function useSessionHistory() {
   const [closedSessions, setClosedSessions] = useState([]);
@@ -68,13 +71,6 @@ export function useSessionHistory() {
   }, []);
 
   const deleteSessionFull = useCallback(async (sessionId) => {
-    const session = closedSessions.find((s) => s.id === sessionId);
-    let updatedHistory = null;
-
-    if (session?.sessionPositions && Object.keys(session.sessionPositions).length > 0) {
-      updatedHistory = await subtractSessionPositionsFromOrg(session.sessionPositions);
-    }
-
     await deleteSession(sessionId);
     setClosedSessions((prev) => prev.filter((s) => s.id !== sessionId));
     setCheckinCache((prev) => {
@@ -83,9 +79,51 @@ export function useSessionHistory() {
       return next;
     });
     if (expandedSessionId === sessionId) setExpandedSessionId(null);
+  }, [expandedSessionId]);
 
-    return updatedHistory;
-  }, [closedSessions, expandedSessionId]);
+  const changeSessionDate = useCallback(async (sessionId, newDate) => {
+    try {
+      await updateSessionDate(sessionId, newDate);
+      setClosedSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, date: newDate } : s))
+      );
+    } catch (err) {
+      console.error("Failed to update session date:", err);
+    }
+  }, []);
+
+  const removePersonFromSessionPairings = useCallback(async (sessionId, personName) => {
+    try {
+      const session = closedSessions.find((s) => s.id === sessionId);
+      if (!session) return;
+      const chambers = session.chambers || [];
+      const spectators = session.spectators || [];
+      const result = removePersonFromPairings(personName, chambers, spectators);
+      await updateSessionPairings(sessionId, result.chambers, result.spectators);
+      setClosedSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId
+            ? { ...s, chambers: result.chambers, spectators: result.spectators }
+            : s
+        )
+      );
+    } catch (err) {
+      console.error("Failed to remove person from session pairings:", err);
+    }
+  }, [closedSessions]);
+
+  const removeSessionCheckin = useCallback(async (sessionId, checkinId) => {
+    try {
+      await removeCheckIn(sessionId, checkinId);
+      setCheckinCache((prev) => {
+        const list = prev[sessionId];
+        if (!list) return prev;
+        return { ...prev, [sessionId]: list.filter((c) => c.id !== checkinId) };
+      });
+    } catch (err) {
+      console.error("Failed to remove checkin:", err);
+    }
+  }, []);
 
   return {
     closedSessions,
@@ -96,5 +134,8 @@ export function useSessionHistory() {
     expandSession,
     renameSession,
     deleteSessionFull,
+    changeSessionDate,
+    removePersonFromSessionPairings,
+    removeSessionCheckin,
   };
 }
