@@ -153,6 +153,7 @@ function AppContent() {
     if (chambers.length > 0 && session?.id) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = null;
         savePairings(chambers, spectators).catch((err) =>
           console.error("Failed to save pairings to Firestore:", err)
         );
@@ -310,10 +311,10 @@ function AppContent() {
   );
 
   const handleDropMotion = useCallback(
-    async (motion, infoslide) => {
+    async (motion, infoslide, travelMinutes, prepMinutes) => {
       if (!session?.id) return;
       try {
-        await saveMotionDrop(session.id, motion, infoslide);
+        await saveMotionDrop(session.id, motion, infoslide, travelMinutes, prepMinutes);
       } catch (err) {
         setAlerts([{ type: "error", message: "Failed to drop motion: " + err.message }]);
       }
@@ -777,6 +778,8 @@ function AppContent() {
                     motion={session.motion}
                     infoslide={session.infoslide}
                     motionDroppedAt={session.motionDroppedAt}
+                    travelMinutes={session.travelMinutes}
+                    prepMinutes={session.prepMinutes}
                   />
                 </div>
               )}
@@ -1023,6 +1026,8 @@ function AppContent() {
                 motion={session?.motion}
                 infoslide={session?.infoslide}
                 motionDroppedAt={session?.motionDroppedAt}
+                travelMinutes={session?.travelMinutes}
+                prepMinutes={session?.prepMinutes}
                 isAdmin
                 onDropMotion={handleDropMotion}
                 onClearMotion={handleClearMotion}

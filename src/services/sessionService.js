@@ -270,16 +270,18 @@ export async function updateSessionDate(sessionId, newDate) {
 
 // --- Motion Drop ---
 
-export async function saveMotionDrop(sessionId, motion, infoslide) {
+export async function saveMotionDrop(sessionId, motion, infoslide, travelMinutes, prepMinutes) {
   const ref = doc(db, "organizations", ORG_ID, "sessions", sessionId);
   return updateDoc(ref, {
     motion,
     infoslide: infoslide || null,
     motionDroppedAt: new Date().toISOString(),
+    travelMinutes: travelMinutes ?? 2,
+    prepMinutes: prepMinutes ?? 15,
   });
 }
 
 export async function clearMotionDrop(sessionId) {
   const ref = doc(db, "organizations", ORG_ID, "sessions", sessionId);
-  return updateDoc(ref, { motion: null, infoslide: null, motionDroppedAt: null });
+  return updateDoc(ref, { motion: null, infoslide: null, motionDroppedAt: null, travelMinutes: null, prepMinutes: null });
 }

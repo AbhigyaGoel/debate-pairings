@@ -2,17 +2,15 @@ import React, { useState, useEffect } from "react";
 import { Eye, Send, X } from "lucide-react";
 import { ROUND_TYPES, POSITION_NAMES } from "../utils/constants";
 
-const TRAVEL_SECONDS = 120;
-const PREP_SECONDS = 900;
-const TOTAL_SECONDS = TRAVEL_SECONDS + PREP_SECONDS;
-
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function MotionTimer({ motionDroppedAt }) {
+function MotionTimer({ motionDroppedAt, travelSeconds, prepSeconds }) {
+  const totalSeconds = travelSeconds + prepSeconds;
+
   const [elapsed, setElapsed] = useState(() =>
     Math.floor((Date.now() - Date.parse(motionDroppedAt)) / 1000)
   );
@@ -24,7 +22,7 @@ function MotionTimer({ motionDroppedAt }) {
     return () => clearInterval(id);
   }, [motionDroppedAt]);
 
-  if (elapsed >= TOTAL_SECONDS) {
+  if (elapsed >= totalSeconds) {
     return (
       <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-xl">
         <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
@@ -33,10 +31,10 @@ function MotionTimer({ motionDroppedAt }) {
     );
   }
 
-  const isTravel = elapsed < TRAVEL_SECONDS;
+  const isTravel = elapsed < travelSeconds;
   const remaining = isTravel
-    ? TRAVEL_SECONDS - elapsed
-    : TOTAL_SECONDS - elapsed;
+    ? travelSeconds - elapsed
+    : totalSeconds - elapsed;
   const phase = isTravel ? "Travel Time" : "Prep Time";
   const colors = isTravel
     ? "bg-amber-50 border-amber-200 text-amber-700"
@@ -58,10 +56,12 @@ function MotionTimer({ motionDroppedAt }) {
 function MotionInput({ onDropMotion }) {
   const [motionText, setMotionText] = useState("");
   const [infoslideText, setInfoslideText] = useState("");
+  const [travelMin, setTravelMin] = useState(2);
+  const [prepMin, setPrepMin] = useState(15);
 
   const handleDrop = () => {
     if (!motionText.trim()) return;
-    onDropMotion(motionText.trim(), infoslideText.trim());
+    onDropMotion(motionText.trim(), infoslideText.trim(), travelMin, prepMin);
   };
 
   return (
@@ -90,6 +90,34 @@ function MotionInput({ onDropMotion }) {
           className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-150 resize-none"
         />
       </div>
+      <div className="flex gap-3">
+        <div className="flex-1">
+          <label className="block text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">
+            Travel Time <span className="normal-case font-normal">(min)</span>
+          </label>
+          <input
+            type="number"
+            min={0}
+            max={30}
+            value={travelMin}
+            onChange={(e) => setTravelMin(Math.max(0, parseInt(e.target.value) || 0))}
+            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-150"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="block text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">
+            Prep Time <span className="normal-case font-normal">(min)</span>
+          </label>
+          <input
+            type="number"
+            min={0}
+            max={60}
+            value={prepMin}
+            onChange={(e) => setPrepMin(Math.max(0, parseInt(e.target.value) || 0))}
+            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-150"
+          />
+        </div>
+      </div>
       <button
         onClick={handleDrop}
         disabled={!motionText.trim()}
@@ -102,10 +130,10 @@ function MotionInput({ onDropMotion }) {
   );
 }
 
-function MotionDisplay({ motion, infoslide, motionDroppedAt, isAdmin, onClearMotion }) {
+function MotionDisplay({ motion, infoslide, motionDroppedAt, travelSeconds, prepSeconds, isAdmin, onClearMotion }) {
   return (
     <div className="space-y-3">
-      <MotionTimer motionDroppedAt={motionDroppedAt} />
+      <MotionTimer motionDroppedAt={motionDroppedAt} travelSeconds={travelSeconds} prepSeconds={prepSeconds} />
 
       <div className="text-center">
         <p className="text-lg sm:text-xl font-semibold text-gray-900 leading-relaxed">
@@ -144,10 +172,15 @@ export const DisplayTab = ({
   motion,
   infoslide,
   motionDroppedAt,
+  travelMinutes,
+  prepMinutes,
   isAdmin,
   onDropMotion,
   onClearMotion,
 }) => {
+  const travelSeconds = (travelMinutes ?? 2) * 60;
+  const prepSeconds = (prepMinutes ?? 15) * 60;
+
   if (chambers.length === 0) {
     return (
       <div className="text-center py-12 text-gray-400">
@@ -166,6 +199,8 @@ export const DisplayTab = ({
               motion={motion}
               infoslide={infoslide}
               motionDroppedAt={motionDroppedAt}
+              travelSeconds={travelSeconds}
+              prepSeconds={prepSeconds}
               isAdmin={isAdmin}
               onClearMotion={onClearMotion}
             />

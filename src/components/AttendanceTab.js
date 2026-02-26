@@ -9,15 +9,15 @@ function formatDateShort(dateStr) {
 }
 
 function rateColor(rate) {
-  if (rate >= 0.75) return "text-emerald-600";
-  if (rate >= 0.5) return "text-amber-600";
+  if (rate >= 0.85) return "text-emerald-600";
+  if (rate >= 0.65) return "text-amber-600";
   if (rate > 0) return "text-red-500";
   return "text-gray-300";
 }
 
 function barColor(rate) {
-  if (rate >= 0.75) return "bg-emerald-500";
-  if (rate >= 0.5) return "bg-amber-500";
+  if (rate >= 0.85) return "bg-emerald-500";
+  if (rate >= 0.65) return "bg-amber-500";
   if (rate > 0) return "bg-red-400";
   return "bg-gray-200";
 }
