@@ -19,9 +19,11 @@ export const PositionBox = ({
 }) => {
   const { dragOverTarget } = useDragDrop();
   const team = chamber.teams.find((t) => t.position === pos);
+  // Only highlight position-level drop zone when no specific member is targeted
   const isDropZone = dragOverTarget?.type === "position" &&
                      dragOverTarget.chamberIdx === chamberIdx &&
-                     dragOverTarget.position === pos;
+                     dragOverTarget.position === pos &&
+                     dragOverTarget.memberIdx === undefined;
 
   return (
     <div
@@ -75,7 +77,7 @@ export const PositionBox = ({
               <div
                 key={member.name}
                 className={`flex items-center gap-2 py-1.5 sm:py-1 px-2 rounded transition-colors duration-150 ${
-                  isHovered ? "bg-red-50" : "hover:bg-gray-50"
+                  isHovered ? "bg-indigo-50 ring-1 ring-indigo-300" : "hover:bg-gray-50"
                 }`}
                 data-drop-type="position"
                 data-drop-chamber={chamberIdx}
@@ -102,8 +104,11 @@ export const PositionBox = ({
                   onDragStart={onDragStart}
                   onDragEnd={onDragEnd}
                 />
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 flex items-center gap-1.5">
                   <div className="font-medium text-sm text-gray-700 truncate">{member.name}</div>
+                  {isHovered && (
+                    <span className="flex-shrink-0 text-[10px] font-semibold text-indigo-600 bg-indigo-100 px-1.5 py-0.5 rounded">Swap</span>
+                  )}
                 </div>
                 {onDeletePerson && (
                   <button
@@ -121,13 +126,22 @@ export const PositionBox = ({
             );
           })}
 
+          {team.members.length === 1 && isDropZone && (
+            <div className="mt-1 text-xs text-indigo-500 font-medium">+ Add to team</div>
+          )}
           {team.members.length === 1 && (
             <span className="inline-block mt-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-xs rounded-full font-medium border border-amber-200">Iron</span>
           )}
           <div className="text-xs text-gray-400 mt-1.5 sm:mt-2">{team.experience}</div>
         </div>
       ) : (
-        <div className="text-gray-300 italic text-center py-2 text-sm">Empty - drag people here</div>
+        <div className={`text-center min-h-[80px] flex items-center justify-center py-6 sm:py-8 rounded-lg border-2 border-dashed transition-all duration-150 ${
+          isDropZone
+            ? "border-indigo-400 bg-indigo-50 text-indigo-500"
+            : "border-gray-200 text-gray-300"
+        }`}>
+          <span className="italic text-sm">{isDropZone ? "Drop here" : "Drop a person or team here"}</span>
+        </div>
       )}
     </div>
   );

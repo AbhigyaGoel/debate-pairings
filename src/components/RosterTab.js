@@ -10,7 +10,7 @@ import {
   AlertTriangle,
   UserCheck,
 } from "lucide-react";
-import { EXPERIENCE_LEVELS } from "../utils/constants";
+import { EXPERIENCE_LEVELS, ROUND_TYPES } from "../utils/constants";
 import { findClosestMember, normalizeName } from "../utils/helpers";
 import { CSVImportModal } from "./CSVImportModal";
 
@@ -282,6 +282,8 @@ export function RosterTab({
   onAddToSession,
   onGeneratePairings,
   pairingLoading,
+  roundType,
+  onRoundTypeChange,
 }) {
   const [showImportModal, setShowImportModal] = useState(false);
   const [search, setSearch] = useState("");
@@ -388,6 +390,15 @@ export function RosterTab({
             <Upload className="w-4 h-4" />
             Import CSV
           </button>
+          <select
+            value={roundType}
+            onChange={(e) => onRoundTypeChange(e.target.value)}
+            className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-200"
+          >
+            {Object.entries(ROUND_TYPES).map(([key, rt]) => (
+              <option key={key} value={key}>{rt.label}</option>
+            ))}
+          </select>
           <button
             onClick={onGeneratePairings}
             disabled={members.length < 4 || pairingLoading}

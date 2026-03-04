@@ -48,6 +48,7 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState(isAdmin ? "session" : "display");
   const [sessionDate, setSessionDate] = useState(() => getLocalDateStr());
   const [loading, setLoading] = useState(false);
+  const [roundType, setRoundType] = useState("opening");
 
   const {
     closedSessions, expandedSessionId, checkinCache,
@@ -416,7 +417,7 @@ function AppContent() {
         return;
       }
 
-      let chamberList = generateChambers(teams).map((chamber) =>
+      let chamberList = generateChambers(teams, roundType).map((chamber) =>
         assignPositionsInChamber(chamber)
       );
       const availableJudges = shuffleArray([...judgeList]);
@@ -486,6 +487,7 @@ function AppContent() {
     assignPositionsInChamber,
     session?.status,
     markDraft,
+    roundType,
   ]);
 
   const generateFromRoster = useCallback(() => {
@@ -982,6 +984,8 @@ function AppContent() {
                 chambers={chambers}
                 spectators={spectators}
                 onAutoPlace={handleAutoPlacePerson}
+                roundType={roundType}
+                onRoundTypeChange={setRoundType}
               />
             )}
 
@@ -999,6 +1003,8 @@ function AppContent() {
                 onAddToSession={handleBatchAddToSession}
                 onGeneratePairings={generateFromRoster}
                 pairingLoading={loading}
+                roundType={roundType}
+                onRoundTypeChange={setRoundType}
               />
             )}
 

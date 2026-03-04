@@ -9,7 +9,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { normalizeName, normalizeRole } from "../utils/helpers";
-import { EXPERIENCE_LEVELS, ROLE_OPTIONS } from "../utils/constants";
+import { EXPERIENCE_LEVELS, ROLE_OPTIONS, ROUND_TYPES } from "../utils/constants";
 
 function useCheckinEditing(checkin) {
   const [editing, setEditing] = useState(false);
@@ -343,6 +343,8 @@ export function SessionTab({
   chambers,
   spectators,
   onAutoPlace,
+  roundType,
+  onRoundTypeChange,
 }) {
   const debaterCount = checkins.filter(
     (c) => normalizeRole(c.role) === "Debate"
@@ -405,6 +407,15 @@ export function SessionTab({
               Will use roster ({rosterDebaterCount} debaters)
             </span>
           )}
+          <select
+            value={roundType}
+            onChange={(e) => onRoundTypeChange(e.target.value)}
+            className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all duration-200"
+          >
+            {Object.entries(ROUND_TYPES).map(([key, rt]) => (
+              <option key={key} value={key}>{rt.label}</option>
+            ))}
+          </select>
           <button
             onClick={onGeneratePairings}
             disabled={!canGenerate || pairingLoading}

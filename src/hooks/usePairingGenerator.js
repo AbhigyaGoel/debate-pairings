@@ -179,8 +179,41 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts, rost
   }, [participants, setSpectators, rosterMembers]);
 
   const createChambers = useCallback(
-    (teams) => {
+    (teams, globalRoundType = "full") => {
       const chamberList = [];
+
+      const processHalfRound = (teams, roundType) => {
+        const shuffled = shuffleArray(teams);
+        while (shuffled.length >= 2) {
+          const chamberTeams = shuffled.splice(0, 2);
+          chamberList.push({
+            id: `chamber-${chamberList.length}`,
+            room: `Room ${chamberList.length + 1}`,
+            teams: chamberTeams.map((team) => ({ ...team, position: null })),
+            judges: [],
+            mixed: chamberTeams[0].experience !== chamberTeams[1].experience,
+            roundType,
+            hasIron: false,
+          });
+        }
+        if (shuffled.length > 0) {
+          setSpectators((prev) => {
+            const newSpectators = [...prev];
+            shuffled.forEach((team) =>
+              team.members.forEach((member) => newSpectators.push(member)),
+            );
+            return newSpectators;
+          });
+        }
+      };
+
+      // When globalRoundType is "opening" or "closing", skip full-round logic entirely
+      if (globalRoundType === "opening" || globalRoundType === "closing") {
+        processHalfRound(shuffleArray([...teams]), globalRoundType);
+        return chamberList;
+      }
+
+      // --- Full round logic (globalRoundType === "full") ---
       const fullRoundTeams = teams.filter(
         (t) =>
           !t.halfRound ||
@@ -262,19 +295,16 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts, rost
       );
 
       if (totalPeople === IRON_SCENARIOS.FULL_ROUND_3_TEAMS) {
-        // 7 people = 3 full teams + 1 iron
         const flatPeople = flattenTeamsToPeople(allRemaining);
         chamberList.push(
           createIronChamber(flatPeople, chamberList.length, "full"),
         );
       } else if (totalPeople === IRON_SCENARIOS.FULL_ROUND_2_TEAMS) {
-        // 5 people = 2 full teams + 1 iron
         const flatPeople = flattenTeamsToPeople(allRemaining);
         chamberList.push(
           createIronChamber(flatPeople, chamberList.length, "full"),
         );
       } else if (totalPeople === IRON_SCENARIOS.HALF_ROUND_1_TEAM) {
-        // 3 people = 1 team + 1 iron - keep partnerships intact
         const soloTeam = allRemaining.find((t) => t.members.length === 1);
         const fullTeam = allRemaining.find((t) => t.members.length === 2);
 
@@ -291,7 +321,6 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts, rost
             hasIron: true,
           });
         } else {
-          // Fallback if no clear solo/pair
           const flatPeople = flattenTeamsToPeople(allRemaining);
           chamberList.push(
             createIronChamber(flatPeople, chamberList.length, "opening"),
@@ -314,31 +343,6 @@ export const usePairingGenerator = (participants, setSpectators, setAlerts, rost
           hasIron: false,
         });
       }
-
-      const processHalfRound = (teams, roundType) => {
-        const shuffled = shuffleArray(teams);
-        while (shuffled.length >= 2) {
-          const chamberTeams = shuffled.splice(0, 2);
-          chamberList.push({
-            id: `chamber-${chamberList.length}`,
-            room: `Room ${chamberList.length + 1}`,
-            teams: chamberTeams.map((team) => ({ ...team, position: null })),
-            judges: [],
-            mixed: chamberTeams[0].experience !== chamberTeams[1].experience,
-            roundType,
-            hasIron: false,
-          });
-        }
-        if (shuffled.length > 0) {
-          setSpectators((prev) => {
-            const newSpectators = [...prev];
-            shuffled.forEach((team) =>
-              team.members.forEach((member) => newSpectators.push(member)),
-            );
-            return newSpectators;
-          });
-        }
-      };
 
       processHalfRound(openingHalfTeams, "opening");
       processHalfRound(closingHalfTeams, "closing");
