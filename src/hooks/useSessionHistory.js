@@ -6,6 +6,7 @@ import {
   deleteSession,
   updateSessionDate,
   updateSessionPairings,
+  updateSessionMotion,
   removeCheckIn,
 } from "../services/sessionService";
 import { removePersonFromPairings } from "../utils/helpers";
@@ -125,6 +126,61 @@ export function useSessionHistory() {
     }
   }, []);
 
+  const updateMotion = useCallback(async (sessionId, motion, infoslide) => {
+    try {
+      await updateSessionMotion(sessionId, motion, infoslide);
+      setClosedSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId ? { ...s, motion: motion || null, infoslide: infoslide || null } : s
+        )
+      );
+    } catch (err) {
+      console.error("Failed to update session motion:", err);
+    }
+  }, []);
+
+  const addPersonToPairings = useCallback(async (sessionId, personName, target) => {
+    // target: { type: "debater", chamberIndex, position }
+    //       | { type: "judge", chamberIndex }
+    //       | { type: "spectator" }
+    try {
+      const session = closedSessions.find((s) => s.id === sessionId);
+      if (!session) return;
+      const chambers = JSON.parse(JSON.stringify(session.chambers || []));
+      const spectators = JSON.parse(JSON.stringify(session.spectators || []));
+
+      if (target.type === "spectator") {
+        spectators.push({ name: personName });
+      } else if (target.type === "judge") {
+        const chamber = chambers[target.chamberIndex];
+        if (!chamber) return;
+        if (!chamber.judges) chamber.judges = [];
+        chamber.judges.push({ name: personName });
+      } else if (target.type === "debater") {
+        const chamber = chambers[target.chamberIndex];
+        if (!chamber) return;
+        const team = chamber.teams.find((t) => t.position === target.position);
+        if (team) {
+          team.members.push({ name: personName });
+        } else {
+          chamber.teams.push({
+            position: target.position,
+            members: [{ name: personName }],
+          });
+        }
+      }
+
+      await updateSessionPairings(sessionId, chambers, spectators);
+      setClosedSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId ? { ...s, chambers, spectators } : s
+        )
+      );
+    } catch (err) {
+      console.error("Failed to add person to pairings:", err);
+    }
+  }, [closedSessions]);
+
   return {
     closedSessions,
     expandedSessionId,
@@ -137,5 +193,7 @@ export function useSessionHistory() {
     changeSessionDate,
     removePersonFromSessionPairings,
     removeSessionCheckin,
+    updateMotion,
+    addPersonToPairings,
   };
 }

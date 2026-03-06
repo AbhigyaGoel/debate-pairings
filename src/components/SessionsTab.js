@@ -11,6 +11,7 @@ import {
   MessageSquare,
   LayoutGrid,
   Calendar,
+  Plus,
 } from "lucide-react";
 import { ROUND_TYPES, POSITION_NAMES } from "../utils/constants";
 
@@ -128,6 +129,40 @@ function SessionDateEditor({ date, onChangeDate }) {
   );
 }
 
+function InlineNameInput({ placeholder, onSubmit, onCancel }) {
+  const [name, setName] = useState("");
+
+  const handleSubmit = () => {
+    const trimmed = name.trim();
+    if (trimmed) {
+      onSubmit(trimmed);
+      setName("");
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleSubmit();
+          if (e.key === "Escape") onCancel();
+        }}
+        placeholder={placeholder}
+        className="px-2 py-0.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 min-w-0 w-32"
+        autoFocus
+      />
+      <button onClick={handleSubmit} className="text-emerald-500 hover:text-emerald-600 p-0.5">
+        <Check className="w-3 h-3" />
+      </button>
+      <button onClick={onCancel} className="text-gray-300 hover:text-gray-500 p-0.5">
+        <X className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
 function AttendeeList({ checkins, sessionId, onRemoveCheckin }) {
   if (!checkins) {
     return (
@@ -218,13 +253,89 @@ function AttendeeList({ checkins, sessionId, onRemoveCheckin }) {
   );
 }
 
-function SessionMotion({ session }) {
-  if (!session.motion) return null;
+function SessionMotion({ session, onUpdateMotion }) {
+  const [editing, setEditing] = useState(false);
+  const [motionDraft, setMotionDraft] = useState("");
+  const [infoslideDraft, setInfoslideDraft] = useState("");
+
+  const startEdit = () => {
+    setMotionDraft(session.motion || "");
+    setInfoslideDraft(session.infoslide || "");
+    setEditing(true);
+  };
+
+  const save = () => {
+    onUpdateMotion(session.id, motionDraft.trim(), infoslideDraft.trim());
+    setEditing(false);
+  };
+
+  const cancel = () => setEditing(false);
+
+  if (editing) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider">
+          <MessageSquare className="w-3.5 h-3.5" />
+          Motion
+        </div>
+        <div className="space-y-2">
+          <textarea
+            value={motionDraft}
+            onChange={(e) => setMotionDraft(e.target.value)}
+            placeholder="Enter motion text..."
+            rows={2}
+            className="w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 resize-none"
+            autoFocus
+          />
+          <textarea
+            value={infoslideDraft}
+            onChange={(e) => setInfoslideDraft(e.target.value)}
+            placeholder="Infoslide (optional)..."
+            rows={2}
+            className="w-full px-3 py-2 text-xs bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 resize-none"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={save}
+              className="px-2.5 py-1 text-xs font-medium text-white bg-indigo-500 hover:bg-indigo-600 rounded-lg transition-colors duration-150"
+            >
+              Save
+            </button>
+            <button
+              onClick={cancel}
+              className="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700 transition-colors duration-150"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!session.motion) {
+    return (
+      <button
+        onClick={startEdit}
+        className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-indigo-500 transition-colors duration-150"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Add motion
+      </button>
+    );
+  }
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider">
         <MessageSquare className="w-3.5 h-3.5" />
         Motion
+        <button
+          onClick={startEdit}
+          className="text-gray-300 hover:text-indigo-500 p-0.5 transition-colors duration-150"
+        >
+          <Edit2 className="w-3 h-3" />
+        </button>
       </div>
       <p className="text-sm font-medium text-gray-800 leading-relaxed">
         &ldquo;{session.motion}&rdquo;
@@ -239,9 +350,34 @@ function SessionMotion({ session }) {
   );
 }
 
-function SessionPairings({ session, onRemovePersonFromPairings }) {
+function SessionPairings({ session, onRemovePersonFromPairings, onAddPersonToPairings }) {
   const chambers = session.chambers;
-  if (!chambers || chambers.length === 0) return null;
+  const [addingTo, setAddingTo] = useState(null); // { chamberIndex, type, position? }
+
+  if (!chambers || chambers.length === 0) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider">
+          <LayoutGrid className="w-3.5 h-3.5" />
+          Pairings
+        </div>
+        <div className="text-xs text-gray-400">No pairings recorded.</div>
+      </div>
+    );
+  }
+
+  const handleAdd = (name) => {
+    if (!addingTo) return;
+    onAddPersonToPairings(session.id, name, addingTo);
+    setAddingTo(null);
+  };
+
+  const isAdding = (chamberIndex, type, position) => {
+    if (!addingTo) return false;
+    return addingTo.chamberIndex === chamberIndex &&
+      addingTo.type === type &&
+      addingTo.position === position;
+  };
 
   return (
     <div className="space-y-2">
@@ -250,8 +386,8 @@ function SessionPairings({ session, onRemovePersonFromPairings }) {
         Pairings ({chambers.length} chamber{chambers.length !== 1 ? "s" : ""})
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {chambers.map((chamber) => (
-          <div key={chamber.id} className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+        {chambers.map((chamber, ci) => (
+          <div key={chamber.id || ci} className="bg-gray-50 border border-gray-200 rounded-xl p-3">
             <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-gray-200">
               <span className="text-sm font-semibold text-gray-700">{chamber.room}</span>
               <span className="text-xs text-gray-400">{ROUND_TYPES[chamber.roundType]?.label || "Full Round"}</span>
@@ -259,36 +395,60 @@ function SessionPairings({ session, onRemovePersonFromPairings }) {
             <div className="space-y-1.5">
               {ROUND_TYPES[chamber.roundType]?.positions.map((pos) => {
                 const team = chamber.teams.find((t) => t.position === pos);
-                if (!team || team.members.length === 0) return null;
                 return (
                   <div key={pos} className="flex items-start gap-2">
                     <span className="text-xs text-gray-400 font-medium w-6 flex-shrink-0 mt-0.5">{pos}</span>
-                    <div className="text-xs text-gray-600 flex items-center gap-1 flex-wrap">
-                      {team.members.map((m, mi) => (
-                        <span key={m.name} className="inline-flex items-center gap-0.5">
-                          {mi > 0 && <span>&amp; </span>}
-                          {m.name}
-                          {onRemovePersonFromPairings && (
-                            <button
-                              onClick={() => {
-                                if (window.confirm(`Remove ${m.name} from this session's pairings?`))
-                                  onRemovePersonFromPairings(session.id, m.name);
-                              }}
-                              className="text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
-                              title={`Remove ${m.name}`}
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
+                    <div className="text-xs text-gray-600 flex items-center gap-1 flex-wrap flex-1">
+                      {team && team.members.length > 0 ? (
+                        <>
+                          {team.members.map((m, mi) => (
+                            <span key={m.name} className="inline-flex items-center gap-0.5">
+                              {mi > 0 && <span>&amp; </span>}
+                              {m.name}
+                              {onRemovePersonFromPairings && (
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm(`Remove ${m.name} from this session's pairings?`))
+                                      onRemovePersonFromPairings(session.id, m.name);
+                                  }}
+                                  className="text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
+                                  title={`Remove ${m.name}`}
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                          {team.members.length === 1 && (
+                            <span className="ml-1 text-amber-600 font-medium">(Iron)</span>
                           )}
-                        </span>
-                      ))}
-                      {team.members.length === 1 && (
-                        <span className="ml-1 text-amber-600 font-medium">(Iron)</span>
+                        </>
+                      ) : null}
+                      {/* Add person to this position */}
+                      {onAddPersonToPairings && !isAdding(ci, "debater", pos) && (
+                        <button
+                          onClick={() => setAddingTo({ chamberIndex: ci, type: "debater", position: pos })}
+                          className="text-gray-300 hover:text-indigo-500 p-0.5 transition-colors duration-150"
+                          title={`Add person to ${pos}`}
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
                       )}
                     </div>
                   </div>
                 );
               })}
+              {/* Inline add for debater */}
+              {addingTo?.chamberIndex === ci && addingTo?.type === "debater" && (
+                <div className="flex items-center gap-2 ml-8">
+                  <span className="text-xs text-gray-400">{addingTo.position}:</span>
+                  <InlineNameInput
+                    placeholder="Name"
+                    onSubmit={handleAdd}
+                    onCancel={() => setAddingTo(null)}
+                  />
+                </div>
+              )}
               {chamber.hasIron && chamber.ironPerson && (
                 <div className="flex items-start gap-2">
                   <span className="text-xs text-amber-600 font-medium w-6 flex-shrink-0 mt-0.5">Fe</span>
@@ -310,71 +470,106 @@ function SessionPairings({ session, onRemovePersonFromPairings }) {
                 </div>
               )}
             </div>
-            {chamber.judges?.length > 0 && (
-              <div className="mt-1.5 pt-1.5 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-1 flex-wrap">
-                Judge:
-                {chamber.judges.map((j, ji) => (
-                  <span key={j.name} className="inline-flex items-center gap-0.5">
-                    {ji > 0 && <span>,</span>}
-                    {j.name}
-                    {onRemovePersonFromPairings && (
-                      <button
-                        onClick={() => {
-                          if (window.confirm(`Remove ${j.name} from this session's pairings?`))
-                            onRemovePersonFromPairings(session.id, j.name);
-                        }}
-                        className="text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
-                        title={`Remove ${j.name}`}
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                  </span>
-                ))}
-              </div>
-            )}
+            {/* Judges */}
+            <div className="mt-1.5 pt-1.5 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-1 flex-wrap">
+              Judge:
+              {chamber.judges?.map((j, ji) => (
+                <span key={j.name} className="inline-flex items-center gap-0.5">
+                  {ji > 0 && <span>,</span>}
+                  {j.name}
+                  {onRemovePersonFromPairings && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Remove ${j.name} from this session's pairings?`))
+                          onRemovePersonFromPairings(session.id, j.name);
+                      }}
+                      className="text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
+                      title={`Remove ${j.name}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </span>
+              ))}
+              {onAddPersonToPairings && !isAdding(ci, "judge") && (
+                <button
+                  onClick={() => setAddingTo({ chamberIndex: ci, type: "judge" })}
+                  className="text-gray-300 hover:text-indigo-500 p-0.5 transition-colors duration-150"
+                  title="Add judge"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              )}
+              {addingTo?.chamberIndex === ci && addingTo?.type === "judge" && (
+                <InlineNameInput
+                  placeholder="Judge name"
+                  onSubmit={handleAdd}
+                  onCancel={() => setAddingTo(null)}
+                />
+              )}
+            </div>
           </div>
         ))}
       </div>
-      {session.spectators?.length > 0 && (
-        <div className="text-xs text-gray-400 flex items-center gap-1 flex-wrap">
-          Spectators:
-          {session.spectators.map((s, si) => {
-            const name = s.name || s;
-            return (
-              <span key={name} className="inline-flex items-center gap-0.5">
-                {si > 0 && <span>,</span>}
-                {name}
-                {onRemovePersonFromPairings && (
-                  <button
-                    onClick={() => {
-                      if (window.confirm(`Remove ${name} from this session's pairings?`))
-                        onRemovePersonFromPairings(session.id, name);
-                    }}
-                    className="text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
-                    title={`Remove ${name}`}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </span>
-            );
-          })}
-        </div>
-      )}
+      {/* Spectators */}
+      <div className="text-xs text-gray-400 flex items-center gap-1 flex-wrap">
+        Spectators:
+        {session.spectators?.map((s, si) => {
+          const name = s.name || s;
+          return (
+            <span key={name} className="inline-flex items-center gap-0.5">
+              {si > 0 && <span>,</span>}
+              {name}
+              {onRemovePersonFromPairings && (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Remove ${name} from this session's pairings?`))
+                      onRemovePersonFromPairings(session.id, name);
+                  }}
+                  className="text-gray-300 hover:text-red-500 p-0.5 transition-colors duration-150"
+                  title={`Remove ${name}`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </span>
+          );
+        })}
+        {onAddPersonToPairings && !(addingTo?.type === "spectator") && (
+          <button
+            onClick={() => setAddingTo({ type: "spectator" })}
+            className="text-gray-300 hover:text-indigo-500 p-0.5 transition-colors duration-150"
+            title="Add spectator"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        )}
+        {addingTo?.type === "spectator" && (
+          <InlineNameInput
+            placeholder="Name"
+            onSubmit={handleAdd}
+            onCancel={() => setAddingTo(null)}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
-function SessionDetails({ session, checkins, onRemovePersonFromPairings, onRemoveCheckin }) {
-  const hasMotion = !!session.motion;
+function SessionDetails({ session, checkins, onRemovePersonFromPairings, onRemoveCheckin, onUpdateMotion, onAddPersonToPairings }) {
   const hasPairings = session.chambers?.length > 0;
 
   return (
     <div className="space-y-4">
-      {hasMotion && <SessionMotion session={session} />}
-      {hasPairings && <SessionPairings session={session} onRemovePersonFromPairings={onRemovePersonFromPairings} />}
-      {(hasMotion || hasPairings) && (
+      <SessionMotion session={session} onUpdateMotion={onUpdateMotion} />
+      {hasPairings && (
+        <SessionPairings
+          session={session}
+          onRemovePersonFromPairings={onRemovePersonFromPairings}
+          onAddPersonToPairings={onAddPersonToPairings}
+        />
+      )}
+      {(session.motion || hasPairings) && (
         <div className="flex items-center gap-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider">
           <Users className="w-3.5 h-3.5" />
           Attendance
@@ -385,7 +580,7 @@ function SessionDetails({ session, checkins, onRemovePersonFromPairings, onRemov
   );
 }
 
-function SessionCard({ session, expanded, checkins, onExpand, onRename, onDelete, onChangeDate, onRemovePersonFromPairings, onRemoveCheckin }) {
+function SessionCard({ session, expanded, checkins, onExpand, onRename, onDelete, onChangeDate, onRemovePersonFromPairings, onRemoveCheckin, onUpdateMotion, onAddPersonToPairings }) {
   const attendanceCount = checkins?.length ?? session.attendanceCount ?? "—";
 
   const handleDelete = (e) => {
@@ -438,6 +633,8 @@ function SessionCard({ session, expanded, checkins, onExpand, onRename, onDelete
             checkins={checkins}
             onRemovePersonFromPairings={onRemovePersonFromPairings}
             onRemoveCheckin={onRemoveCheckin}
+            onUpdateMotion={onUpdateMotion}
+            onAddPersonToPairings={onAddPersonToPairings}
           />
         </div>
       )}
@@ -445,7 +642,7 @@ function SessionCard({ session, expanded, checkins, onExpand, onRename, onDelete
   );
 }
 
-function SessionRow({ session, expanded, checkins, onExpand, onRename, onDelete, onChangeDate, onRemovePersonFromPairings, onRemoveCheckin }) {
+function SessionRow({ session, expanded, checkins, onExpand, onRename, onDelete, onChangeDate, onRemovePersonFromPairings, onRemoveCheckin, onUpdateMotion, onAddPersonToPairings }) {
   const attendanceCount = checkins?.length ?? session.attendanceCount ?? "—";
 
   const handleDelete = (e) => {
@@ -494,6 +691,8 @@ function SessionRow({ session, expanded, checkins, onExpand, onRename, onDelete,
               checkins={checkins}
               onRemovePersonFromPairings={onRemovePersonFromPairings}
               onRemoveCheckin={onRemoveCheckin}
+              onUpdateMotion={onUpdateMotion}
+              onAddPersonToPairings={onAddPersonToPairings}
             />
           </td>
         </tr>
@@ -513,6 +712,8 @@ export function SessionsTab({
   onChangeDate,
   onRemovePersonFromPairings,
   onRemoveCheckin,
+  onUpdateMotion,
+  onAddPersonToPairings,
 }) {
   if (loading) {
     return (
@@ -553,6 +754,8 @@ export function SessionsTab({
             onChangeDate={onChangeDate}
             onRemovePersonFromPairings={onRemovePersonFromPairings}
             onRemoveCheckin={onRemoveCheckin}
+            onUpdateMotion={onUpdateMotion}
+            onAddPersonToPairings={onAddPersonToPairings}
           />
         ))}
       </div>
@@ -583,6 +786,8 @@ export function SessionsTab({
                 onChangeDate={onChangeDate}
                 onRemovePersonFromPairings={onRemovePersonFromPairings}
                 onRemoveCheckin={onRemoveCheckin}
+                onUpdateMotion={onUpdateMotion}
+                onAddPersonToPairings={onAddPersonToPairings}
               />
             ))}
           </tbody>

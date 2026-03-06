@@ -268,6 +268,16 @@ export async function updateSessionDate(sessionId, newDate) {
   return updateDoc(ref, { date: newDate });
 }
 
+// --- Session History Editing ---
+
+export async function updateSessionMotion(sessionId, motion, infoslide) {
+  const ref = doc(db, "organizations", ORG_ID, "sessions", sessionId);
+  return updateDoc(ref, {
+    motion: motion || null,
+    infoslide: infoslide || null,
+  });
+}
+
 // --- Motion Drop ---
 
 export async function saveMotionDrop(sessionId, motion, infoslide, travelMinutes, prepMinutes) {

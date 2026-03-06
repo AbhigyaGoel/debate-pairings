@@ -20,10 +20,31 @@ import { usePositionAssignment } from "./hooks/usePositionAssignment";
 import { useDragDropHandlers } from "./hooks/useDragDropHandlers";
 import { useSessionHistory } from "./hooks/useSessionHistory";
 import { useAttendance } from "./hooks/useAttendance";
+import { useVideos } from "./hooks/useVideos";
+import { useResources } from "./hooks/useResources";
+import { useMotions } from "./hooks/useMotions";
 import { useDragDrop } from "./contexts/DragDropContext";
 import { shuffleArray, normalizeName, normalizeRole, removePersonFromPairings, getLocalDateStr } from "./utils/helpers";
 import { ROUND_TYPES, POSITION_NAMES } from "./utils/constants";
 import { computePositionHistoryFromSessions, updateSessionName, saveMotionDrop, clearMotionDrop, deleteAttendanceForMember } from "./services/sessionService";
+
+const MotionsTab = React.lazy(() =>
+  import("./components/MotionsTab").then((m) => ({ default: m.MotionsTab }))
+);
+const VideosTab = React.lazy(() =>
+  import("./components/VideosTab").then((m) => ({ default: m.VideosTab }))
+);
+const ResourcesTab = React.lazy(() =>
+  import("./components/ResourcesTab").then((m) => ({ default: m.ResourcesTab }))
+);
+
+function TabFallback() {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <div className="glass-spinner" />
+    </div>
+  );
+}
 
 function AppContent() {
   const { user, isAdmin, adminName, loading: authLoading, loginAsAdmin, logout } =
@@ -55,6 +76,7 @@ function AppContent() {
     loading: sessionsLoading, loadSessions,
     expandSession, renameSession, deleteSessionFull,
     changeSessionDate, removePersonFromSessionPairings, removeSessionCheckin,
+    updateMotion, addPersonToPairings,
   } = useSessionHistory();
 
   const {
@@ -63,6 +85,10 @@ function AppContent() {
     progress: attendanceProgress, loadAttendance, invalidateCache: invalidateAttendanceCache,
     toggleAttendance, deleteAttendanceMember, editSessionDate,
   } = useAttendance(members, checkins, session?.date);
+
+  const { videos, loading: videosLoading, loadVideos, addVideo, updateVideo, deleteVideo, bulkAddVideos } = useVideos();
+  const { resources, loading: resourcesLoading, loadResources, addResource, updateResource, deleteResource, bulkAddResources } = useResources();
+  const { motions, loading: motionsLoading, loadMotions } = useMotions();
 
   // Wrap checkIn to auto-add walk-ins to roster
   const checkInAndAutoRoster = useCallback(async (memberData) => {
@@ -670,9 +696,9 @@ function AppContent() {
 
   const sessionActive = session && (session.status === "open" || session.status === "paired");
   const adminTabs = sessionActive
-    ? ["session", "chambers", "display", "roster", "attendance", "sessions"]
-    : ["roster", "display", "attendance", "sessions"];
-  const viewerTabs = ["display"];
+    ? ["session", "chambers", "display", "roster", "attendance", "sessions", "motions", "videos", "resources"]
+    : ["roster", "display", "attendance", "sessions", "motions", "videos", "resources"];
+  const viewerTabs = ["display", "motions", "videos", "resources"];
   const visibleTabs = isAdmin ? adminTabs : viewerTabs;
 
   const TAB_LABELS = {
@@ -682,6 +708,9 @@ function AppContent() {
     display: "Round",
     attendance: "Attendance",
     sessions: "Sessions",
+    motions: "Motions",
+    videos: "Videos",
+    resources: "Resources",
   };
 
   const effectiveTab = visibleTabs.includes(activeTab) ? activeTab : visibleTabs[0];
@@ -695,6 +724,19 @@ function AppContent() {
   useEffect(() => {
     if (effectiveTab === "attendance") loadAttendance();
   }, [effectiveTab, loadAttendance]);
+
+  // Load motions/videos/resources when their tab is opened
+  useEffect(() => {
+    if (effectiveTab === "motions") loadMotions();
+  }, [effectiveTab, loadMotions]);
+
+  useEffect(() => {
+    if (effectiveTab === "videos") loadVideos();
+  }, [effectiveTab, loadVideos]);
+
+  useEffect(() => {
+    if (effectiveTab === "resources") loadResources();
+  }, [effectiveTab, loadResources]);
 
   if (authLoading || sessionLoading) {
     return (
@@ -751,40 +793,98 @@ function AppContent() {
             />
           )}
 
-          {!session ? (
-            <div className="glass rounded-2xl p-4 sm:p-6">
-              <div className="text-center py-16 text-gray-400">
-                <p className="text-lg font-medium">No active session</p>
-                <p className="text-sm mt-1 text-gray-300">Check back when an admin starts a session</p>
+          {/* Viewer tab bar */}
+          <div className="glass rounded-2xl mb-4 sm:mb-6">
+            <div className="border-b border-gray-100">
+              <div className="flex gap-1 p-1.5">
+                {viewerTabs.map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 whitespace-nowrap flex-1 text-center ${
+                      effectiveTab === tab
+                        ? "glass-strong text-gray-900"
+                        : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    {TAB_LABELS[tab]}
+                  </button>
+                ))}
               </div>
             </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="glass rounded-2xl p-4 sm:p-6">
-                <CheckInView
-                  members={members}
-                  myCheckIn={myCheckIn}
-                  session={session}
-                  onCheckIn={checkInAndAutoRoster}
-                  onUpdateCheckIn={updateCheckIn}
-                  onLeave={() => myCheckIn && removeCheckIn(myCheckIn.id)}
-                />
-              </div>
+          </div>
 
-              {session.status === "paired" && (session.chambers?.length > 0 || chambers.length > 0) && (
+          {/* Viewer tab content */}
+          {effectiveTab === "display" && (
+            <>
+              {!session ? (
                 <div className="glass rounded-2xl p-4 sm:p-6">
-                  <DisplayTab
-                    chambers={session.chambers || chambers}
-                    spectators={session.spectators || spectators}
-                    sessionDate={session.date}
-                    motion={session.motion}
-                    infoslide={session.infoslide}
-                    motionDroppedAt={session.motionDroppedAt}
-                    travelMinutes={session.travelMinutes}
-                    prepMinutes={session.prepMinutes}
-                  />
+                  <div className="text-center py-16 text-gray-400">
+                    <p className="text-lg font-medium">No active session</p>
+                    <p className="text-sm mt-1 text-gray-300">Check back when an admin starts a session</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="glass rounded-2xl p-4 sm:p-6">
+                    <CheckInView
+                      members={members}
+                      myCheckIn={myCheckIn}
+                      session={session}
+                      onCheckIn={checkInAndAutoRoster}
+                      onUpdateCheckIn={updateCheckIn}
+                      onLeave={() => myCheckIn && removeCheckIn(myCheckIn.id)}
+                    />
+                  </div>
+
+                  {session.status === "paired" && (session.chambers?.length > 0 || chambers.length > 0) && (
+                    <div className="glass rounded-2xl p-4 sm:p-6">
+                      <DisplayTab
+                        chambers={session.chambers || chambers}
+                        spectators={session.spectators || spectators}
+                        sessionDate={session.date}
+                        motion={session.motion}
+                        infoslide={session.infoslide}
+                        motionDroppedAt={session.motionDroppedAt}
+                        travelMinutes={session.travelMinutes}
+                        prepMinutes={session.prepMinutes}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
+            </>
+          )}
+
+          {effectiveTab === "motions" && (
+            <div className="glass rounded-2xl p-4 sm:p-6">
+              <React.Suspense fallback={<TabFallback />}>
+                <MotionsTab motions={motions} loading={motionsLoading} />
+              </React.Suspense>
+            </div>
+          )}
+
+          {effectiveTab === "videos" && (
+            <div className="glass rounded-2xl p-4 sm:p-6">
+              <React.Suspense fallback={<TabFallback />}>
+                <VideosTab
+                  videos={videos}
+                  loading={videosLoading}
+                  isAdmin={false}
+                />
+              </React.Suspense>
+            </div>
+          )}
+
+          {effectiveTab === "resources" && (
+            <div className="glass rounded-2xl p-4 sm:p-6">
+              <React.Suspense fallback={<TabFallback />}>
+                <ResourcesTab
+                  resources={resources}
+                  loading={resourcesLoading}
+                  isAdmin={false}
+                />
+              </React.Suspense>
             </div>
           )}
         </div>
@@ -1066,7 +1166,43 @@ function AppContent() {
                 onChangeDate={changeSessionDate}
                 onRemovePersonFromPairings={removePersonFromSessionPairings}
                 onRemoveCheckin={removeSessionCheckin}
+                onUpdateMotion={updateMotion}
+                onAddPersonToPairings={addPersonToPairings}
               />
+            )}
+
+            {effectiveTab === "motions" && (
+              <React.Suspense fallback={<TabFallback />}>
+                <MotionsTab motions={motions} loading={motionsLoading} />
+              </React.Suspense>
+            )}
+
+            {effectiveTab === "videos" && (
+              <React.Suspense fallback={<TabFallback />}>
+                <VideosTab
+                  videos={videos}
+                  loading={videosLoading}
+                  isAdmin={isAdmin}
+                  onAddVideo={(data) => addVideo({ ...data, createdBy: adminName })}
+                  onUpdateVideo={updateVideo}
+                  onDeleteVideo={deleteVideo}
+                  onBulkImport={bulkAddVideos}
+                />
+              </React.Suspense>
+            )}
+
+            {effectiveTab === "resources" && (
+              <React.Suspense fallback={<TabFallback />}>
+                <ResourcesTab
+                  resources={resources}
+                  loading={resourcesLoading}
+                  isAdmin={isAdmin}
+                  onAddResource={(data) => addResource({ ...data, createdBy: adminName })}
+                  onUpdateResource={updateResource}
+                  onDeleteResource={deleteResource}
+                  onBulkImport={bulkAddResources}
+                />
+              </React.Suspense>
             )}
           </div>
         </div>
